@@ -411,7 +411,9 @@ function bStart(bym) {
 const bEnd = bym => addDays(bStart(ymAdd(bym, 1)), -1);
 const bymOfDate = k => k >= bStart(ymOf(k)) ? ymOf(k) : ymAdd(ymOf(k), -1);
 const bRange = bym => `${shortDate(bStart(bym))} – ${shortDate(bEnd(bym))}`;
-const curBym = () => bymOfDate(dayKey());
+// пока учёт не начался — все расчёты ведутся от дня старта, как будто остаток на карте 0
+const effToday = () => (S.profile.onboarded && S.profile.startBalance == null && S.profile.startDate > dayKey()) ? S.profile.startDate : dayKey();
+const curBym = () => bymOfDate(effToday());
 function nextBudgetStart() {
   const t = dayKey(), c = bStart(ymOf(t));
   return c > t ? c : bStart(ymAdd(ymOf(t), 1));
@@ -469,7 +471,7 @@ function calcL(B0, evs, floor) {
 }
 let FC = null;
 function forecast() {
-  const today = dayKey();
+  const today = effToday();
   if (FC && FC.ver === ver && FC.today === today) return FC;
   const tYm = ymOf(today), floor = S.profile.floor || 0;
   const occ = genOcc(ymAdd(tYm, -2), ymAdd(tYm, 14));
@@ -822,7 +824,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.5.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.5.1</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1197,8 +1199,7 @@ const useIcon = t => ({ live: '🍽', pay: '📌', flex: '🤝', goal: '🎯' }[
 function useLine(u, today) {
   if (u.type === 'live') {
     const label = u.from === u.to ? `Жизнь ${shortDate(u.from)}` : `Жизнь ${shortDate(u.from)} – ${shortDate(u.to)}`;
-    const later = bymOfDate(u.from) > curBym() && diffDays(today, u.from) > 20;
-    return `<div class="kv"><span>🍽 ${label} <small class="sub">${u.days} дн${u.from === today ? ' · с сегодня' : ''}</small>${later ? ' <small class="env">резерв</small>' : ''}</span><span>${fmt(Math.round(u.amount))}</span></div>`;
+    return `<div class="kv"><span>🍽 ${label} <small class="sub">${u.days} дн${u.from === today ? ' · с сегодня' : ''}</small></span><span>${fmt(Math.round(u.amount))}</span></div>`;
   }
   const part = Math.round(u.amount) < Math.round(u.total);
   const env = u.date > today;
@@ -1217,13 +1218,14 @@ function srcCard(s, today, compact) {
 }
 function renderDist() {
   const R = distribute(), today = R.today;
-  let h = `<div class="card"><div class="card-t" style="margin-bottom:8px">Как работает</div>
+  let h = (waiting() ? `<div class="banner yel"><span class="ic">📅</span><span>Учёт начнётся ${longDate(S.profile.startDate)}. Пока план посчитан от этого дня с нулевым остатком — реальный остаток вы введёте в день старта, и всё пересчитается.</span></div>` : '') + `<div class="card"><div class="card-t" style="margin-bottom:8px">Как работает</div>
     <p class="note">Дневной лимит <b class="mono" style="color:var(--text)">${fmt(Math.round(R.L))} ₸</b> рассчитан так, чтобы хватило на все платежи года. Каждая нужда — день жизни, платёж, отцу, цель — оплачивается самыми ранними ещё не распределёнными деньгами. «Конверт» — деньги, которые приходят раньше платежа и до его даты не трогаются.</p>
     <p class="note" style="margin-top:6px">Деньги месяца сначала закрывают нужды своего месяца, излишек остаётся конвертом под будущие крупные платежи. Показаны доходы до ${longDate(R.endDate)}, пересчёт — после каждой траты и отметки.</p></div>`;
   if (R.short.length) h += `<div class="banner red"><span class="ic">⚠️</span><span>Не хватает: ${R.short.slice(0, 3).map(x => `${esc(x.label)} ${shortDate(x.date)} — <b>${money(x.amount)}</b>`).join('; ')}</span></div>`;
   let curB = null;
   for (const s of R.src) {
-    const b = s.start ? curBym() : bymOfDate(s.date);
+    if (s.start && !s.amount && !s.uses.length) continue;
+    const b = s.start ? curBym() : s.bym;
     if (b !== curB) { curB = b; h += `<div class="month-h"><h2>Бюджет ${MON_G2(b)}</h2><span class="sub">${bRange(b)}</span></div>`; }
     h += srcCard(s, today);
   }
