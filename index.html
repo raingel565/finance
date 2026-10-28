@@ -821,7 +821,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.4.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.4.1</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1608,8 +1608,14 @@ function importData(file) {
         // файл-шаблон расписания: заменяет только доходы и платежи, журнал и баланс не трогает
         if (S.schedule.length && !confirm(`Заменить расписание (${S.schedule.length} правил) на правила из файла (${raw.schedule.length})?`)) return;
         S.schedule = raw.schedule.map(normItem); S.occ = {};
+        // цели из файла добавляются к существующим (по названию без дублей)
+        let ng = 0;
+        for (const g of raw.goals || []) {
+          if (!g.name || !(+g.amount > 0) || S.goals.some(x => x.name === g.name && !x.done)) continue;
+          S.goals.push({ id: uid(), name: g.name, amount: Math.round(+g.amount), date: g.date || null, cushion: !!g.cushion, ops: [], done: null, createdAt: new Date().toISOString() }); ng++;
+        }
         save(); closeSheet(); render(); if ($('#onb').classList.contains('open')) renderOnb();
-        toast(`Загружено правил: ${S.schedule.length}`);
+        toast(`Загружено правил: ${S.schedule.length}${ng ? `, целей: ${ng}` : ''}`);
         return;
       }
       const n = normalize(raw.data);
