@@ -823,7 +823,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.3.1</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.3.2</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1114,9 +1114,30 @@ function installCardHtml() {
   return `<div class="card"><div class="card-t" style="margin-bottom:8px">📲 Установить на телефон</div>${diag}
     ${deferredInstall ? `<p class="sub" style="margin-bottom:12px">Иконка на рабочем столе, полный экран, работа без интернета.</p><button class="btn block" data-act="install">Установить приложение</button>`
       : `<p class="sub">Android, Chrome: меню <b>⋮</b> → <b>«Установить приложение»</b> (или «Добавить на главный экран» → «Установить»).<br>iPhone, Safari: «Поделиться» → «На экран Домой».</p>
-         <p class="note" style="margin-top:8px">Если Chrome пишет «уже установлено» и предлагает только ярлык — удалите старый ярлык «Финансы» с рабочего стола, закройте Chrome и откройте сайт снова. Должна появиться кнопка «Установить».</p>`}</div>`;
+         <p class="note" style="margin-top:8px">Кнопка появляется, когда Chrome разрешает установку. Если её нет — смотрите диагностику ниже.</p>`}
+    <details class="closed" style="margin-top:10px"><summary class="link" style="font-family:var(--font)">Диагностика установки ▾</summary><div id="instDiag" class="note" style="margin-top:8px;line-height:1.7">проверяю…</div></details></div>`;
 }
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; render(); });
+let bipFired = false;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; bipFired = true; render(); });
+async function fillInstallDiag() {
+  const el = document.getElementById('instDiag'); if (!el) return;
+  const row = (ok, t) => `${ok === true ? '✅' : ok === false ? '❌' : '•'} ${t}`;
+  const out = [];
+  out.push(row(location.protocol === 'https:' || location.hostname === 'localhost', 'Адрес: ' + esc(location.origin + location.pathname)));
+  let man = null;
+  try { const href = document.querySelector('link[rel=manifest]').href; man = await (await fetch(href, { cache: 'no-store' })).json(); } catch (e) {}
+  out.push(row(!!man, man ? `Манифест загружен, id: «${esc(man.id || 'нет — старая версия файла')}»` : 'Манифест не загрузился — проверьте, что файл manifest.webmanifest лежит рядом с index.html'));
+  if (man && !man.id) out.push(row(false, 'Загрузите на GitHub новый manifest.webmanifest из архива'));
+  let iconOk = false;
+  try { iconOk = (await fetch('icons/icon-192.png', { cache: 'no-store' })).ok; } catch (e) {}
+  out.push(row(iconOk, iconOk ? 'Иконки на месте' : 'Нет папки icons с иконками — загрузите её'));
+  const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+  out.push(row(!!(reg && reg.active), reg && reg.active ? 'Офлайн-режим (service worker) работает' : 'Service worker ещё не запущен — обновите страницу'));
+  out.push(row(bipFired, bipFired ? 'Chrome разрешил установку — нажмите кнопку выше' : 'Chrome не предложил установку'));
+  if (!bipFired && man && man.id && iconOk && reg && reg.active) out.push(`<br>Всё в порядке с файлами, значит Chrome считает приложение <b>уже установленным</b>. Проверьте: <b>Настройки телефона → Приложения</b> — найдите «Финансы» или «Finance Flow» и удалите. Затем удалите ярлык с рабочего стола, закройте Chrome (смахните из недавних) и откройте сайт снова.<br>На компьютере кнопка установки — значок ⊕ справа в адресной строке.`);
+  el.innerHTML = out.join('<br>');
+}
+document.addEventListener('toggle', e => { if (e.target.querySelector && e.target.querySelector('#instDiag')) fillInstallDiag(); }, true);
 window.addEventListener('appinstalled', () => { deferredInstall = null; toast('Приложение установлено'); render(); });
 async function doInstall() {
   if (!deferredInstall) return;

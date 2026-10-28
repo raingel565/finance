@@ -1,6 +1,6 @@
 // Finance Flow — service worker
 // При каждом обновлении приложения меняйте версию, чтобы телефоны подтянули новые файлы.
-const VERSION = 'ff-v0.3.1';
+const VERSION = 'ff-v0.3.2';
 const SHELL = [
   './',
   './index.html',
@@ -45,6 +45,15 @@ self.addEventListener('fetch', e => {
         const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); return res;
       }).catch(() => hit))
     );
+    return;
+  }
+
+  // манифест и скрипт воркера: всегда сначала сеть — чтобы Chrome сразу видел актуальный манифест (id, иконки)
+  if (url.origin === location.origin && /\.webmanifest$|sw\.js$/.test(url.pathname)) {
+    e.respondWith(fetch(req, { cache: 'no-store' }).then(res => {
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
+      return res;
+    }).catch(() => caches.match(req)));
     return;
   }
 
