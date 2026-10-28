@@ -781,6 +781,7 @@ function ruleText(it) {
   else parts.push(it.day >= 31 ? 'последний день месяца' : `${it.day}-го`);
   if (!it.flexible) parts.push({ before: 'выходной → раньше', after: 'выходной → позже', none: 'без переноса' }[it.shift]);
   if (it.mode === 'dec') parts.push(`убывает до ~${sMoney(decLast(it))} к ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
+  else if (it.endMonth && it.endMonth === it.startMonth) parts.push(`разово, ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
   else if (it.endMonth) parts.push(`до ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
   if (it.prevMonth && !it.flexible) parts.push('→ бюджет прошлого месяца');
   if (it.isDebt) parts.push('долг');
@@ -821,7 +822,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.4.1</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.5.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1148,26 +1149,29 @@ async function doInstall() {
 /* ======================= распределение доходов (конверты) ======================= */
 // 1) Ровный лимит L уже посчитан на год вперёд — он гарантирует, что денег хватит на всё.
 // 2) Все нужды выстраиваются по датам: каждый день жизни (L), платежи, отцу (в рекомендованный день), цели.
-// 3) Каждая нужда оплачивается самыми ранними ещё не распределёнными деньгами (FIFO):
-//    сначала остаток на карте, потом первый доход, потом следующий. В один день доходы приходят до платежей.
-// Итог: у каждого дохода — точный план: жизнь на такие-то дни, такие-то платежи, в конверт под такой-то будущий платёж.
+// 3) Кто платит: сначала деньги того же бюджетного месяца (в порядке поступления),
+//    затем резерв прошлых месяцев (самый старый первым). Излишек месяца, который не понадобился в своём месяце,
+//    так и остаётся конвертом под крупные будущие платежи (налоги) — и это видно в карточке каждого дохода.
 let DS = null;
 function distribute() {
   const F = forecast();
   if (DS && DS.ver === F.ver && DS.today === F.today) return DS;
   const today = F.today, L = Math.max(0, F.L), floor = S.profile.floor || 0;
-  const endDate = bEnd(ymAdd(curBym(), 1));
-  const D = Math.max(0, diffDays(today, endDate));
-  const src = [{ key: 'start', name: 'Деньги на карте сейчас', date: today, d: 0, amount: Math.max(0, F.B0 - floor), uses: [], start: true }];
-  F.evs.filter(e => e.a > 0 && e.d <= D).sort((a, b) => a.d - b.d)
-    .forEach(e => src.push({ key: e.o.key, name: e.o.name, date: addDays(today, e.d), d: e.d, amount: e.a, uses: [], o: e.o }));
+  const endDate = bEnd(ymAdd(curBym(), 1));               // что показываем
+  const Dfull = H;                                         // что считаем — весь горизонт
+  const src = [{ key: 'start', name: 'Деньги на карте сейчас', date: today, d: 0, bym: curBym(), amount: Math.max(0, F.B0 - floor), uses: [], start: true }];
+  F.evs.filter(e => e.a > 0).sort((a, b) => a.d - b.d)
+    .forEach(e => src.push({ key: e.o.key, name: e.o.name, date: addDays(today, e.d), d: e.d, bym: e.o.bym || bymOfDate(addDays(today, e.d)), amount: e.a, uses: [], o: e.o }));
   const rem = src.map(s => s.amount);
-  const payBy = {};   // ключ платежа -> откуда собран
-  const short = [];
-  const take = (d, need, use) => {
+  const payBy = {}, short = [];
+  const take = (d, bym, need, use) => {
     let left = need;
-    for (let i = 0; i < src.length && left > 0.5; i++) {
-      if (src[i].d > d || rem[i] <= 0.5) continue;
+    const avail = src.map((s, i) => i).filter(i => src[i].d <= d && rem[i] > 0.5);
+    const order = avail.filter(i => src[i].bym === bym)                          // свой месяц
+      .concat(avail.filter(i => src[i].bym < bym))                               // резерв прошлых (старые первыми)
+      .concat(avail.filter(i => src[i].bym > bym));                              // на крайний случай
+    for (const i of order) {
+      if (left <= 0.5) break;
       const t = Math.min(rem[i], left); rem[i] -= t; left -= t;
       const u = src[i].uses, last = u[u.length - 1];
       if (use.type === 'live' && last && last.type === 'live' && last.to === addDays(today, d - 1)) { last.to = addDays(today, d); last.amount += t; last.days++; }
@@ -1176,22 +1180,25 @@ function distribute() {
     }
     if (left > 0.5) short.push({ date: addDays(today, d), label: use.label, amount: left });
   };
-  for (let d = 0; d <= D; d++) {
+  for (let d = 0; d <= Dfull; d++) {
+    const k = addDays(today, d);
     for (const e of F.evs.filter(e => e.a < 0 && e.d === d)) {
       const kind = e.o.kind === 'goal' ? 'goal' : e.o.flex ? 'flex' : 'pay';
-      take(d, -e.a, { type: kind, key: e.o.key, label: e.o.name, date: addDays(today, d), total: -e.a });
+      take(d, e.o.bym || bymOfDate(k), -e.a, { type: kind, key: e.o.key, label: e.o.name, date: k, total: -e.a });
     }
-    if (L > 0) take(d, L, { type: 'live', label: 'Жизнь' });
+    if (L > 0) take(d, bymOfDate(k), L, { type: 'live', label: 'Жизнь' });
   }
   src.forEach((s, i) => { s.free = rem[i]; });
-  DS = { ver: F.ver, today, L, endDate, src, payBy, short };
+  const lastBym = ymAdd(curBym(), 1);
+  DS = { ver: F.ver, today, L, endDate, src: src.filter(s => s.start || s.bym <= lastBym), payBy, short: short.filter(x => x.date <= endDate) };
   return DS;
 }
 const useIcon = t => ({ live: '🍽', pay: '📌', flex: '🤝', goal: '🎯' }[t] || '•');
 function useLine(u, today) {
   if (u.type === 'live') {
     const label = u.from === u.to ? `Жизнь ${shortDate(u.from)}` : `Жизнь ${shortDate(u.from)} – ${shortDate(u.to)}`;
-    return `<div class="kv"><span>🍽 ${label} <small class="sub">${u.days} дн${u.from === today ? ' · с сегодня' : ''}</small></span><span>${fmt(Math.round(u.amount))}</span></div>`;
+    const later = bymOfDate(u.from) > curBym() && diffDays(today, u.from) > 20;
+    return `<div class="kv"><span>🍽 ${label} <small class="sub">${u.days} дн${u.from === today ? ' · с сегодня' : ''}</small>${later ? ' <small class="env">резерв</small>' : ''}</span><span>${fmt(Math.round(u.amount))}</span></div>`;
   }
   const part = Math.round(u.amount) < Math.round(u.total);
   const env = u.date > today;
@@ -1212,7 +1219,7 @@ function renderDist() {
   const R = distribute(), today = R.today;
   let h = `<div class="card"><div class="card-t" style="margin-bottom:8px">Как работает</div>
     <p class="note">Дневной лимит <b class="mono" style="color:var(--text)">${fmt(Math.round(R.L))} ₸</b> рассчитан так, чтобы хватило на все платежи года. Каждая нужда — день жизни, платёж, отцу, цель — оплачивается самыми ранними ещё не распределёнными деньгами. «Конверт» — деньги, которые приходят раньше платежа и до его даты не трогаются.</p>
-    <p class="note" style="margin-top:6px">План до ${longDate(R.endDate)}. Пересчитывается после каждой траты и отметки.</p></div>`;
+    <p class="note" style="margin-top:6px">Деньги месяца сначала закрывают нужды своего месяца, излишек остаётся конвертом под будущие крупные платежи. Показаны доходы до ${longDate(R.endDate)}, пересчёт — после каждой траты и отметки.</p></div>`;
   if (R.short.length) h += `<div class="banner red"><span class="ic">⚠️</span><span>Не хватает: ${R.short.slice(0, 3).map(x => `${esc(x.label)} ${shortDate(x.date)} — <b>${money(x.amount)}</b>`).join('; ')}</span></div>`;
   let curB = null;
   for (const s of R.src) {
@@ -1477,12 +1484,12 @@ function openItem(id, kindNew) {
           <div class="field"><label>${dateMode === 'win' ? 'С какого числа' : 'Число'}</label><input id="itDay" inputmode="numeric" value="${d.day}"></div>
           ${dateMode === 'win' ? `<div class="field"><label>По какое</label><input id="itDayTo" inputmode="numeric" value="${d.dayTo || Math.min(31, d.day + 4)}"></div>` : ''}
         </div>
-        <p class="note" style="margin:-4px 0 12px">31 = последний день месяца.${dateMode === 'win' ? ' В лимите доход учитывается по последнему дню окна.' : ''}</p>
+        <p class="note" style="margin:-4px 0 12px">31 = последний день месяца.${dateMode === 'win' ? ' В лимите доход учитывается по последнему дню окна.' : ''} Разовый платёж — укажите одинаковые «с месяца» и «по месяц».</p>
         <div class="field" style="margin-bottom:6px"><label>Если выпадает на выходной или праздник</label></div>
         <div class="stabs">${[['before', 'Раньше'], ['after', 'Позже'], ['none', 'Не переносить']].map(([k, l]) => `<button data-sh="${k}" class="${d.shift === k ? 'on' : ''}">${l}</button>`).join('')}</div>`}
       <div class="two">
         <div class="field"><label>С месяца</label><input id="itStart" type="month" value="${d.startMonth}"></div>
-        <div class="field"><label>По месяц${d.mode === 'dec' ? '' : ' (необяз.)'}</label><input id="itEnd" type="month" value="${d.endMonth || ''}"></div>
+        <div class="field"><label>По месяц${d.mode === 'dec' ? '' : ' (необяз.)'}${d.endMonth && d.endMonth === d.startMonth ? ' · разово' : ''}</label><input id="itEnd" type="month" value="${d.endMonth || ''}"></div>
       </div>
       ${dateMode === 'flex' ? '<p class="note" style="margin:-4px 0 12px">Окно — бюджетный месяц: от первой зарплаты месяца до следующей.</p>'
         : `<label class="toggle"><span>Относится к прошлому месяцу<small>${inc ? 'оплата за работу прошлого месяца, приходит в начале следующего' : 'закрывается деньгами прошлого месяца (аренда 1-го, кредиты 2-го)'}</small></span><input type="checkbox" id="itPrev" ${d.prevMonth ? 'checked' : ''}></label>`}
