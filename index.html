@@ -264,6 +264,7 @@ const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 const shortDate = k => `${+k.slice(8)} ${MON_S[+k.slice(5, 7) - 1]}`;
 const longDate = k => `${+k.slice(8)} ${MON_G[+k.slice(5, 7) - 1]}`;
 const wd = k => WD[fromKey(k).getDay()];
+const MON_G2 = ym => MON_G[+ym.slice(5) - 1];
 const ymName = ym => `${MON[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`;
 const ymNameShort = ym => `${MON[+ym.slice(5) - 1]}${ym.slice(0, 4) !== String(new Date().getFullYear()) ? ' ' + ym.slice(0, 4) : ''}`;
 const relDay = k => { const n = diffDays(dayKey(), k); return n === 0 ? 'сегодня' : n === 1 ? 'завтра' : n === -1 ? 'вчера' : n > 0 ? `через ${n} ${plural(n, 'день', 'дня', 'дней')}` : `${-n} ${plural(-n, 'день', 'дня', 'дней')} назад`; };
@@ -277,7 +278,7 @@ const CATS = [
 ];
 const defaults = () => ({
   v: 1,
-  profile: { onboarded: false, startBalance: 0, startDate: null, floor: 0, createdAt: new Date().toISOString() },
+  profile: { onboarded: false, startBalance: 0, startDate: null, floor: 0, boundary: 2, createdAt: new Date().toISOString() },
   schedule: [],   // правила доходов и платежей
   occ: {},        // состояние конкретного месяца: { 'id|YYYY-MM': { st:'done'|'skip', txId, amt, date } }
   tx: [],         // журнал: expense / income / payment / adjust
@@ -354,7 +355,33 @@ function itemAmount(it, ym) {
   return it.amount;
 }
 function decLast(it) { const n = monthsBetween(it.startMonth, it.endMonth) + 1; return n > 1 ? Math.round(2 * it.total / n - it.amount) : it.amount; }
-function genOcc(fromYm, toYm) {
+/* ======================= бюджетный месяц ======================= */
+// Бюджетный месяц начинается с первой «своей» зарплаты месяца (у вас ЗП 15-го) и длится до следующей.
+// Записи с отметкой «относится к прошлому месяцу» (аренда 1-го, кредиты 2-го, фриланс 2-го и 6–10-го)
+// закрываются / зарабатываются в предыдущем бюджете, даже если фактически приходят в следующем месяце.
+const bymOfItem = (it, ym) => it.prevMonth && !it.flexible ? ymAdd(ym, -1) : ym;
+const bsCache = {};
+function bStart(bym) {
+  const k = bym + '|' + ver;
+  if (bsCache[k]) return bsCache[k];
+  const ds = S.schedule.filter(it => it.kind === 'income' && !it.prevMonth && !it.paused && (!it.startMonth || it.startMonth <= bym) && (!it.endMonth || it.endMonth >= bym))
+    .map(it => shiftDay(ymDay(bym, it.day), it.shift));
+  return (bsCache[k] = ds.length ? ds.sort()[0] : ymDay(bym, 1));
+}
+const bEnd = bym => addDays(bStart(ymAdd(bym, 1)), -1);
+const bymOfDate = k => k >= bStart(ymOf(k)) ? ymOf(k) : ymAdd(ymOf(k), -1);
+const bRange = bym => `${shortDate(bStart(bym))} – ${shortDate(bEnd(bym))}`;
+const curBym = () => bymOfDate(dayKey());
+function nextBudgetStart() {
+  const t = dayKey(), c = bStart(ymOf(t));
+  return c > t ? c : bStart(ymAdd(ymOf(t), 1));
+}
+const txBym = t => {
+  if (t.occKey) { const [id, ym] = t.occKey.split('|'); const it = item(id); if (it) return bymOfItem(it, ym); }
+  return bymOfDate(t.date);
+};
+
+function genOcc(fromYm, toYm, all) {
   const out = [];
   for (const it of S.schedule) {
     if (it.paused) continue;
@@ -363,24 +390,24 @@ function genOcc(fromYm, toYm) {
       if (it.endMonth && ym > it.endMonth) continue;
       const key = it.id + '|' + ym, st = S.occ[key] || {};
       let raw, early, date;
-      if (it.flexible) { raw = ymDay(ym, 31); early = ymDay(ym, 1); date = raw; }
+      if (it.flexible) { early = bStart(ym); raw = bEnd(ym); date = raw; }   // «в течение месяца» = в течение бюджетного месяца
       else {
         raw = ymDay(ym, it.day); early = shiftDay(raw, it.shift);
         date = it.dayTo ? shiftDay(ymDay(ym, it.dayTo), it.shift) : early;
       }
       if (st.date) { date = st.date; if (!it.dayTo && !it.flexible) early = st.date; }
-      out.push({ key, it, ym, kind: it.kind, name: it.name, amount: st.amt ?? itemAmount(it, ym), raw, early, date,
+      out.push({ key, it, ym, bym: bymOfItem(it, ym), kind: it.kind, name: it.name, amount: st.amt ?? itemAmount(it, ym), raw, early, date,
         flex: it.flexible, win: !!it.dayTo && !st.date, status: st.st || null, txId: st.txId || null, st });
     }
   }
   const sd = S.profile.startDate || dayKey();
-  return out.filter(o => o.status || o.date >= sd)
+  return out.filter(o => all || o.status || o.date >= sd)
     .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.kind === b.kind ? 0 : a.kind === 'income' ? -1 : 1);
 }
 
 /* ======================= баланс ======================= */
 const txSign = t => t.type === 'income' ? 1 : t.type === 'adjust' ? 1 : -1;
-const balance = () => S.profile.startBalance + S.tx.reduce((s, t) => t.noBal ? s : s + txSign(t) * t.amount, 0);
+const balance = () => (S.profile.startBalance || 0) + S.tx.reduce((s, t) => t.noBal ? s : s + txSign(t) * t.amount, 0);
 const spentOn = k => S.tx.filter(t => t.type === 'expense' && t.date === k && !t.noBal).reduce((s, t) => s + t.amount, 0);
 
 /* ======================= ровный лимит ======================= */
@@ -454,13 +481,13 @@ function forecast() {
   // кассовый разрыв: первый день, когда даже без трат баланс уходит ниже остатка
   let gap = null;
   for (let d = 0; d <= H; d++) { const room = bal + r.cum[d] - floor; if (room < 0) { gap = { d, date: addDays(today, d), short: -room }; break; } }
-  const flexPlan = flex.map(o => ({ o, date: place[o.key], src: incomeBefore(occ, place[o.key], o.ym), why: why[o.key] }));
+  const flexPlan = flex.map(o => ({ o, date: place[o.key], src: incomeBefore(occ, place[o.key], o.early), why: why[o.key] }));
   const nextInc = fixed.filter(e => e.a > 0).sort((a, b) => a.d - b.d)[0] || null;
   FC = { ver, today, bal, spent, B0, L: r.L, bind: r.bind, bindDate: addDays(today, r.bind), cum: r.cum, evs, occ, pending, overdueInc, overduePay, flexPlan, gap, nextInc };
   return FC;
 }
-function incomeBefore(occ, date, ym) {
-  const inc = occ.filter(o => o.kind === 'income' && o.date <= date && o.date >= ymDay(ym, 1) && o.status !== 'skip').sort((a, b) => a.date < b.date ? 1 : -1)[0];
+function incomeBefore(occ, date, from) {
+  const inc = occ.filter(o => o.kind === 'income' && o.date <= date && o.date >= from && o.status !== 'skip').sort((a, b) => a.date < b.date ? 1 : -1)[0];
   return inc || null;
 }
 const flexDate = o => { const F = forecast(), p = F.flexPlan.find(x => x.o.key === o.key); return p ? p.date : o.date; };
@@ -492,7 +519,7 @@ function go(name) {
   $$('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === name));
   $$('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name));
   $('#title').textContent = TITLES[name];
-  $('#fab').style.display = name === 'home' || name === 'log' ? '' : 'none';
+  $('#fab').style.display = (name === 'home' || name === 'log') && !waiting() ? '' : 'none';
   window.scrollTo(0, 0);
   render();
 }
@@ -520,6 +547,17 @@ function occLine(o, opts = {}) {
     <span class="v ${inc ? 'pos' : ''}">${inc ? '+' : '−'}${fmt(o.amount)}</span></li>`;
 }
 function renderHome() {
+  if (waiting()) {
+    const sd = S.profile.startDate, n = diffDays(dayKey(), sd);
+    const F = forecast(), first = F.occ.filter(o => ymOf(planDate(o)) === ymOf(sd)).slice(0, 6);
+    $('#homeBox').innerHTML = `<div class="card hero"><div class="lim-l">Учёт начнётся</div><div class="lim-v">${longDate(sd)}</div>
+        <div class="lim-s">${n > 0 ? `через ${n} ${plural(n, 'день', 'дня', 'дней')}` : 'сегодня'} · в этот день утром введите баланс на карте</div>
+        ${n <= 0 ? '<button class="btn block" style="margin-top:14px" data-act="start">Ввести баланс и начать</button>' : ''}</div>
+      <div class="card"><div class="card-h"><span class="card-t">Первые события ${ymNameShort(ymOf(sd))}</span><button class="link" data-act="cal">календарь</button></div>
+        <ul class="list">${first.map(o => `<li class="tap" data-occ="${o.key}"><span class="emo">${o.kind === 'income' ? '💰' : o.flex ? '🤝' : '📌'}</span><div class="grow"><div>${esc(o.name)}</div><div class="d">${shortDate(planDate(o))}, ${wd(planDate(o))}</div></div><span class="v ${o.kind === 'income' ? 'pos' : ''}">${o.kind === 'income' ? '+' : '−'}${fmt(o.amount)}</span></li>`).join('')}</ul></div>
+      <p class="note" style="margin:0 4px">Пока можно проверить и поправить расписание во вкладке «План». Лимит появится, когда будет известен стартовый баланс.</p>`;
+    return;
+  }
   const F = forecast(), today = F.today;
   if (!S.schedule.length) {
     $('#homeBox').innerHTML = `<div class="card"><div class="card-t" style="margin-bottom:10px">Начните с расписания</div>
@@ -597,26 +635,27 @@ function bindNote(F) {
 }
 
 /* ---------- журнал ---------- */
-let logYm = ymOf(dayKey()), logFilter = 'all';
+let logYm = null, logFilter = 'all';
 const TX_T = { expense: 'Трата', income: 'Доход', payment: 'Платёж', adjust: 'Корректировка' };
 function txRow(t) {
   const c = t.type === 'expense' ? cat(t.cat) : null;
   const e = t.type === 'expense' ? c.e : t.type === 'income' ? '💰' : t.type === 'payment' ? '📌' : '⚖️';
   const title = t.type === 'expense' ? (t.note || c.n) : t.name || TX_T[t.type];
-  const sub = [t.type === 'expense' && t.note ? c.n : TX_T[t.type], t.noBal ? 'без изменения баланса' : '', t.prevMonth ? 'за прошлый месяц' : ''].filter(Boolean).join(' · ');
+  const sub = [t.type === 'expense' && t.note ? c.n : TX_T[t.type], t.noBal ? 'без изменения баланса' : '', t.occKey && txBym(t) !== bymOfDate(t.date) ? 'бюджет ' + MON_G2(txBym(t)) : ''].filter(Boolean).join(' · ');
   const sign = txSign(t) * t.amount;
   return `<li class="tap" data-tx="${t.id}"><span class="emo">${e}</span><div class="grow"><div>${esc(title)}</div><div class="d">${esc(sub)}</div></div>
     <span class="v ${sign > 0 ? 'pos' : ''}" style="${t.noBal ? 'opacity:.5' : ''}">${sign > 0 ? '+' : '−'}${fmt(Math.abs(sign))}</span></li>`;
 }
 function renderLog() {
-  const txs = S.tx.filter(t => ymOf(t.date) === logYm);
+  if (!logYm) logYm = curBym();
+  const txs = S.tx.filter(t => txBym(t) === logYm);
   const inc = txs.filter(t => t.type === 'income' && !t.noBal).reduce((s, t) => s + t.amount, 0);
   const exp = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const pay = txs.filter(t => t.type === 'payment' && !t.noBal).reduce((s, t) => s + t.amount, 0);
   const shown = txs.filter(t => logFilter === 'all' || t.type === logFilter).sort((a, b) => a.date === b.date ? (a.ts < b.ts ? 1 : -1) : a.date < b.date ? 1 : -1);
   const byDay = {};
   for (const t of shown) (byDay[t.date] = byDay[t.date] || []).push(t);
-  let h = `<div class="card"><div class="card-h"><div class="monthnav"><button data-lm="-1" aria-label="Предыдущий месяц">‹</button><span>${ymNameShort(logYm)}</span><button data-lm="1" aria-label="Следующий месяц" ${logYm >= ymOf(dayKey()) ? 'disabled style="opacity:.3"' : ''}>›</button></div></div>
+  let h = `<div class="card"><div class="card-h"><div class="monthnav"><button data-lm="-1" aria-label="Предыдущий месяц">‹</button><span>${ymNameShort(logYm)}</span><button data-lm="1" aria-label="Следующий месяц" ${logYm >= curBym() ? 'disabled style="opacity:.3"' : ''}>›</button></div><span class="sub mono" style="font-size:11px">${bRange(logYm)}</span></div>
     <div class="sum3"><div class="metric"><div class="l">Доходы</div><div class="n pos">${sMoney(inc)}</div></div>
       <div class="metric"><div class="l">Траты</div><div class="n">${sMoney(exp)}</div></div>
       <div class="metric"><div class="l">Платежи</div><div class="n">${sMoney(pay)}</div></div></div>
@@ -638,17 +677,20 @@ function renderCal() {
   const F = forecast(), today = F.today, tYm = ymOf(today);
   if (!S.schedule.length) { $('#calBox').innerHTML = '<p class="empty">Расписание пустое. Добавьте доходы и платежи во вкладке «План».</p>'; return; }
   let h = '<p class="sub" style="margin:0 4px 4px">Тап по строке: подтвердить, пропустить, изменить сумму или дату этого месяца.</p>';
-  for (let i = 0; i < 4; i++) {
-    const ym = ymAdd(tYm, i);
-    const vis = F.occ.filter(o => ymOf(planDate(o)) === ym)
+  const cb = curBym();
+  for (let i = 0; i < 5; i++) {
+    const ym = ymAdd(cb, i);
+    const vis = F.occ.filter(o => o.bym === ym)
       .sort((a, b) => planDate(a) < planDate(b) ? -1 : planDate(a) > planDate(b) ? 1 : a.kind === 'income' ? -1 : 1);
     if (!vis.length) continue;
     const inc = vis.filter(o => o.kind === 'income' && o.status !== 'skip').reduce((s, o) => s + o.amount, 0);
     const out = vis.filter(o => o.kind === 'payment' && o.status !== 'skip').reduce((s, o) => s + o.amount, 0);
-    h += `<div class="month-h"><h2>${ymNameShort(ym)}</h2><span class="sub"><span class="pos">+${sMoney(inc)}</span> · −${sMoney(out)} · <b style="color:var(--text)">${inc - out >= 0 ? '+' : '−'}${sMoney(Math.abs(inc - out))}</b></span></div>
+    const days = diffDays(bStart(ym), bEnd(ym)) + 1;
+    h += `<div class="month-h"><h2>${ymNameShort(ym)} <span class="sub" style="font-size:12px;font-weight:400;text-transform:none">${bRange(ym)}</span></h2><span class="sub"><span class="pos">+${sMoney(inc)}</span> · −${sMoney(out)}</span></div>
+      <p class="note" style="margin:-4px 4px 8px">Свободно на жизнь: <b class="mono" style="color:var(--text)">${money(inc - out)}</b>${inc - out > 0 ? ` · ≈ ${fmt(Math.round((inc - out) / days))} ₸/день на ${days} дн` : ''}</p>
       <div class="card" style="padding:4px 12px"><ul class="list">${vis.map(o => calRow(o, today)).join('')}</ul></div>`;
   }
-  h += '<p class="note" style="margin:6px 4px">Даты уже с учётом выходных и праздников РК. Доходы с «окном» планируются по последнему дню окна.</p>';
+  h += `<p class="note" style="margin:6px 4px">Месяц — бюджетный: начинается с первой зарплаты месяца. Записи «за прошлый месяц» (аренда, кредиты и фриланс начала месяца) — в бюджете предыдущего. Даты с учётом выходных и праздников РК, доходы с «окном» — по последнему дню окна.</p>`;
   $('#calBox').innerHTML = h;
 }
 function calRow(o, today) {
@@ -666,7 +708,7 @@ function calRow(o, today) {
   if (o.st.date) notes.push('дата изменена');
   if (o.st.amt != null || (it.overrides && it.overrides[o.ym] != null)) notes.push('сумма изменена');
   if (it.mode === 'dec' && o.st.amt == null && !(it.overrides && it.overrides[o.ym] != null)) notes.push('оценка');
-  if (it.prevMonth) notes.push(`за ${MON[+ymAdd(o.ym, -1).slice(5) - 1]}`);
+  if (o.bym !== ymOf(d)) notes.push(`бюджет ${MON_G2(o.bym)}`);
   return `<li class="tap occ-row ${o.status || ''}" data-occ="${o.key}">
     <div class="cal-day ${isOff(d) ? 'off' : ''}"><b>${+d.slice(8)}</b><span>${wd(d)}</span></div>
     <div class="grow"><div>${esc(o.name)}</div><div class="d">${notes.join(' · ')}</div></div>
@@ -682,22 +724,25 @@ function ruleText(it) {
   if (!it.flexible) parts.push({ before: 'выходной → раньше', after: 'выходной → позже', none: 'без переноса' }[it.shift]);
   if (it.mode === 'dec') parts.push(`убывает до ~${sMoney(decLast(it))} к ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
   else if (it.endMonth) parts.push(`до ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
-  if (it.prevMonth) parts.push('за прошлый месяц');
+  if (it.prevMonth && !it.flexible) parts.push('→ бюджет прошлого месяца');
   if (it.paused) parts.push('на паузе');
   return parts.join(' · ');
 }
 function renderPlan() {
   const incs = S.schedule.filter(i => i.kind === 'income'), pays = S.schedule.filter(i => i.kind === 'payment');
   const tYm = ymOf(dayKey());
-  const mInc = incs.filter(i => !i.paused && i.startMonth <= tYm && (!i.endMonth || i.endMonth >= tYm)).reduce((s, i) => s + itemAmount(i, tYm), 0);
-  const mPay = pays.filter(i => !i.paused && i.startMonth <= ymAdd(tYm, 1) && (!i.endMonth || i.endMonth >= ymAdd(tYm, 1))).reduce((s, i) => s + itemAmount(i, ymAdd(tYm, 1)), 0);
+  const pb = waiting() ? bymOfDate(S.profile.startDate) : curBym();
+  const po = genOcc(ymAdd(pb, -1), ymAdd(pb, 2), true).filter(o => o.bym === pb);
+  const mInc = po.filter(o => o.kind === 'income').reduce((s, o) => s + o.amount, 0);
+  const mPay = po.filter(o => o.kind === 'payment').reduce((s, o) => s + o.amount, 0);
+  const pDays = diffDays(bStart(pb), bEnd(pb)) + 1;
   const row = it => `<li class="tap plan-row" data-item="${it.id}"><span class="emo">${it.kind === 'income' ? '💰' : it.flexible ? '🤝' : '📌'}</span>
     <div class="grow"><div>${esc(it.name)}</div><div class="rule">${ruleText(it)}</div></div><span class="v ${it.kind === 'income' ? 'pos' : ''}">${fmt(it.amount)}</span></li>`;
   let h = `<div class="card"><div class="sum3">
       <div class="metric"><div class="l">Доходы/мес</div><div class="n pos">${sMoney(mInc)}</div></div>
       <div class="metric"><div class="l">Платежи/мес</div><div class="n">${sMoney(mPay)}</div></div>
       <div class="metric"><div class="l">Свободно</div><div class="n">${sMoney(mInc - mPay)}</div></div></div>
-      <p class="note" style="margin-top:10px">Доходы — за ${MON[+tYm.slice(5) - 1]}, платежи — за ${MON[+ymAdd(tYm, 1).slice(5) - 1]}. «Свободно» — до трат на жизнь.</p></div>
+      <p class="note" style="margin-top:10px">Бюджет ${MON_G2(pb)}: ${bRange(pb)}. «Свободно» — на жизнь${mInc - mPay > 0 ? `, ≈ ${fmt(Math.round((mInc - mPay) / pDays))} ₸ в день` : ''}.</p></div>
     <div class="sec-h"><h2>Доходы</h2><button class="add-btn" data-new="income">+ Доход</button></div>
     <div class="card" style="padding:4px 14px">${incs.length ? `<ul class="list">${incs.map(row).join('')}</ul>` : '<p class="empty">Нет доходов</p>'}</div>
     <div class="sec-h"><h2>Обязательные платежи</h2><button class="add-btn" data-new="payment">+ Платёж</button></div>
@@ -714,8 +759,9 @@ function renderPlan() {
       <div class="set-row"><div><div class="l">Последний бэкап</div><div class="h">${S.meta.lastBackup ? new Date(S.meta.lastBackup).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'ещё не было'}</div></div></div>
       <div class="row" style="margin-top:12px"><button class="btn grow" data-act="export">Экспорт</button><button class="btn ghost grow" data-act="import">Импорт</button></div>
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
-      <button class="btn danger block" style="margin-top:12px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · этап 1 · v0.1.0</p>`;
+      <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
+      <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · этап 1 · v0.2.1</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -823,7 +869,7 @@ function openOcc(key) {
   if (!o.flex && !o.win && o.raw !== o.date && !o.st.date) info += `<div class="kv"><span>Перенос</span><span>с ${shortDate(o.raw)} (${holidayName(o.raw) || 'выходной'})</span></div>`;
   if (o.flex) { const p = forecast().flexPlan.find(x => x.o.key === key); info += `<div class="kv"><span>Срок</span><span>до ${longDate(o.date)}</span></div>${p && p.src ? `<div class="kv"><span>Источник</span><span>${esc(p.src.name)}</span></div>` : ''}${p && p.why ? `<p class="note" style="margin-top:8px">Можно и ${longDate(p.why.alt)}, лимит не изменится, но ${longDate(p.why.worst)} запас на счету упадёт до ${money(Math.max(0, p.why.room))}.</p>` : ''}`; }
   info += `<div class="kv"><span>Сумма</span><span>${fmt(o.amount)} ₸${it.mode === 'dec' && o.st.amt == null && it.overrides[o.ym] == null ? ' · оценка' : ''}</span></div>`;
-  if (it.prevMonth) info += `<div class="kv"><span>Относится к</span><span>${MON[+ymAdd(o.ym, -1).slice(5) - 1]}</span></div>`;
+  info += `<div class="kv"><span>Бюджет</span><span>${ymNameShort(o.bym)} (${bRange(o.bym)})</span></div>`;
   let body = '';
   if (o.status === 'done') {
     body = `<div class="banner yel" style="border-color:rgba(62,224,143,.4);background:rgba(62,224,143,.07)"><span class="ic">✓</span><span>${inc ? 'Получено' : 'Оплачено'}${tx ? ` ${longDate(tx.date)}: <b>${fmt(tx.amount)} ₸</b>${tx.noBal ? ' (баланс не менялся)' : ''}` : ''}</span></div>
@@ -869,7 +915,7 @@ function openConfirm(key, editing) {
   const ok = () => {
     const a = parseMoney(amt.value); if (!a || a <= 0) return shake(amt);
     const rec = tx || { id: uid(), ts: new Date().toISOString() };
-    Object.assign(rec, { type: inc ? 'income' : 'payment', amount: a, date: $('#cfDate').value || today, name: o.name, occKey: key, noBal: $('#cfNoBal').checked, prevMonth: o.it.prevMonth || undefined });
+    Object.assign(rec, { type: inc ? 'income' : 'payment', amount: a, date: $('#cfDate').value || today, name: o.name, occKey: key, noBal: $('#cfNoBal').checked });
     if (!tx) S.tx.push(rec);
     S.occ[key] = { ...(S.occ[key] || {}), st: 'done', txId: rec.id };
     vibrate(20);
@@ -947,7 +993,8 @@ function openItem(id, kindNew) {
         <div class="field"><label>С месяца</label><input id="itStart" type="month" value="${d.startMonth}"></div>
         <div class="field"><label>По месяц${d.mode === 'dec' ? '' : ' (необяз.)'}</label><input id="itEnd" type="month" value="${d.endMonth || ''}"></div>
       </div>
-      ${inc ? `<label class="toggle"><span>Относится к прошлому месяцу<small>например, оплата 2-го числа за прошлый месяц — для отчётов</small></span><input type="checkbox" id="itPrev" ${d.prevMonth ? 'checked' : ''}></label>` : ''}
+      ${dateMode === 'flex' ? '<p class="note" style="margin:-4px 0 12px">Окно — бюджетный месяц: от первой зарплаты месяца до следующей.</p>'
+        : `<label class="toggle"><span>Относится к прошлому месяцу<small>${inc ? 'оплата за работу прошлого месяца, приходит в начале следующего' : 'закрывается деньгами прошлого месяца (аренда 1-го, кредиты 2-го)'}</small></span><input type="checkbox" id="itPrev" ${d.prevMonth ? 'checked' : ''}></label>`}
       ${old ? `<label class="toggle"><span>На паузе<small>временно не участвует в расчётах</small></span><input type="checkbox" id="itPause" ${d.paused ? 'checked' : ''}></label>` : ''}
       <button class="btn block" id="itOk">${old ? 'Сохранить' : 'Добавить'}</button>
       ${old ? '<button class="btn danger block" style="margin-top:8px" id="itDel">Удалить правило</button>' : ''}`);
@@ -962,8 +1009,8 @@ function openItem(id, kindNew) {
     if ($('#itDayTo')) d.dayTo = Math.round(+$('#itDayTo').value) || null;
     d.startMonth = $('#itStart').value || d.startMonth;
     d.endMonth = $('#itEnd').value || null;
-    if ($('#itPrev')) d.prevMonth = $('#itPrev').checked;
     if ($('#itPause')) d.paused = $('#itPause').checked;
+    if ($('#itPrev')) d.prevMonth = $('#itPrev').checked;
   };
   handler = e => {
     const b = e.target.closest('[data-md],[data-dm],[data-sh]'); if (b) {
@@ -1081,8 +1128,10 @@ function importData(file) {
 }
 
 /* ---------- онбординг ---------- */
-let onbStep = 0;
-function openOnb() { onbStep = 0; $('#onb').classList.add('open'); renderOnb(); }
+let onbStep = 0, onbMode = 'today', onbStartNow = false;
+const nextMonth1 = () => nextBudgetStart();
+const waiting = () => S.profile.onboarded && S.profile.startBalance == null;
+function openOnb(step = 0, startNow = false) { onbStep = step; onbStartNow = startNow; onbMode = 'today'; $('#onb').classList.add('open'); renderOnb(); }
 function renderOnb() {
   let h;
   if (onbStep === 0) h = `<div class="onb-body"><div class="onb-logo">₸</div><h2>Finance Flow</h2>
@@ -1091,26 +1140,51 @@ function renderOnb() {
     </div>
     <button class="btn block" id="onNext">${S.schedule.length ? 'Дальше' : 'Начать'}</button>
     ${S.schedule.length ? '' : '<button class="btn ghost block" style="margin-top:8px" id="onImp">Импортировать файл</button>'}`;
-  else h = `<div class="onb-body"><h2>Сколько денег сейчас?</h2>
-      <p>Текущий баланс на карте (на всех счетах, которые используете на жизнь). С него начнётся расчёт. Позже его всегда можно сверить.</p>
+  else if (onbStartNow) h = `<div class="onb-body"><h2>Начинаем учёт ☀️</h2>
+      <p>Введите, сколько сейчас денег на карте (на всех счетах, которые используете на жизнь). Всё, что пришло и ушло до этого момента, считается уже учтённым.</p>
       <div class="field"><input id="onBal" class="huge" inputmode="numeric" data-money placeholder="0"><span class="u">₸</span></div>
-      <p class="note">Если сегодня уже пришла зарплата или прошёл платёж — вводите баланс после них, а событие в календаре отметьте «Уже учтено в балансе».</p></div>
-    <div class="row"><button class="btn ghost" id="onBack" style="flex:0 0 auto">Назад</button><button class="btn grow" id="onDone">Готово</button></div>`;
+      <p class="note">Вводите баланс до прихода сегодняшней зарплаты, а потом отметьте её «Пришло». Если она уже пришла — введите баланс с ней и отметьте «Уже учтено в балансе».</p></div>
+    <button class="btn block" id="onDone">Начать</button>`;
+  else {
+    const nm = nextMonth1();
+    h = `<div class="onb-body"><h2>С какого дня вести учёт?</h2>
+      <div class="stabs" style="margin-bottom:18px"><button data-om="today" class="${onbMode === 'today' ? 'on' : ''}">С сегодня</button><button data-om="next" class="${onbMode === 'next' ? 'on' : ''}">С бюджета ${MON_G2(ymOf(nm))}</button></div>
+      ${onbMode === 'today' ? `<p>Текущий баланс на карте (на всех счетах, которые используете на жизнь). С него начнётся расчёт. Позже его всегда можно сверить.</p>
+        <div class="field"><input id="onBal" class="huge" inputmode="numeric" data-money placeholder="0"><span class="u">₸</span></div>
+        <p class="note">Если сегодня уже пришла зарплата или прошёл платёж — вводите баланс после них, а событие в календаре отметьте «Уже учтено в балансе».</p>`
+      : `<p>Бюджет ${MON_G2(ymOf(nm))} начинается <b style="color:var(--text)">${longDate(nm)}</b> — с первой зарплаты месяца. Аренда, кредиты и доходы начала месяца до этой даты относятся к прошлому бюджету. До этого можно посмотреть план, а лимит и журнал включатся в этот день.</p>
+        <div class="banner yel"><span class="ic">📅</span><span>${longDate(nm)} приложение попросит остаток на карте до прихода зарплаты — хвост прошлого бюджета. Потом отметите ЗП «Пришло» — это первая запись нового месяца.</span></div>`}
+    </div>
+    <div class="row"><button class="btn ghost" id="onBack" style="flex:0 0 auto">Назад</button><button class="btn grow" id="onDone">${onbMode === 'today' ? 'Готово' : 'Начать с ' + longDate(nm)}</button></div>`;
+  }
   $('#onb').innerHTML = h;
   if ($('#onNext')) $('#onNext').onclick = () => { onbStep = 1; renderOnb(); };
   if ($('#onImp')) $('#onImp').onclick = () => $('#importFile').click();
   if ($('#onBack')) $('#onBack').onclick = () => { onbStep = 0; renderOnb(); };
+  $$('#onb [data-om]').forEach(b => b.onclick = () => { onbMode = b.dataset.om; renderOnb(); });
   if ($('#onBal')) { setTimeout(() => $('#onBal').focus(), 200); onEnter($('#onBal'), finishOnb); }
   if ($('#onDone')) $('#onDone').onclick = finishOnb;
 }
 function finishOnb() {
+  if (!onbStartNow && onbMode === 'next') {
+    Object.assign(S.profile, { startBalance: null, startDate: nextMonth1(), onboarded: true });
+    S.tx = []; S.occ = {};
+    save(); $('#onb').classList.remove('open'); go('cal');
+    toast(`Учёт начнётся ${longDate(S.profile.startDate)}. Пока можно посмотреть план`);
+    return;
+  }
   const v = parseMoney($('#onBal').value);
   if (v == null) return shake($('#onBal'));
+  // учёт начинается с момента ввода баланса: всё, что было раньше, уже внутри баланса
   Object.assign(S.profile, { startBalance: v, startDate: dayKey(), onboarded: true });
   S.tx = []; S.occ = {};
   save(); $('#onb').classList.remove('open');
   go(S.schedule.length ? 'home' : 'plan');
   toast(S.schedule.length ? 'Готово! Лимит рассчитан' : 'Добавьте доходы и платежи');
+}
+// день старта наступил — спросить баланс
+function checkStart() {
+  if (waiting() && dayKey() >= S.profile.startDate && !$('#onb').classList.contains('open')) openOnb(1, true);
 }
 
 /* ======================= события ======================= */
@@ -1149,6 +1223,12 @@ $('#app').addEventListener('click', e => {
   if (act === 'import') $('#importFile').click();
   if (act === 'cats') openCats();
   if (act === 'hol') openHol();
+  if (act === 'start') openOnb(1, true);
+  if (act === 'cal') go('cal');
+  if (act === 'restart') {
+    if (!confirm('Начать учёт заново? Журнал операций и отметки календаря обнулятся, расписание останется. Сначала лучше сделать экспорт.')) return;
+    openOnb(1);
+  }
   if (act === 'reset') {
     if (!confirm('Удалить все данные? Сначала лучше сделать экспорт.')) return;
     if (!confirm('Точно? Действие нельзя отменить.')) return;
@@ -1170,14 +1250,14 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   try { S = normalize(JSON.parse(localStorage.getItem(KEY))); } catch (e) {}
   ver++; offCache = {};
-  if (dayKey() !== lastDay) { lastDay = dayKey(); toast('Новый день — лимит пересчитан'); }
-  render();
+  if (dayKey() !== lastDay) { lastDay = dayKey(); if (!waiting()) toast('Новый день — лимит пересчитан'); }
+  render(); checkStart();
 });
 window.addEventListener('storage', e => { if (e.key === KEY) { S = normalize(JSON.parse(e.newValue)); ver++; render(); } });
 
 /* ======================= старт ======================= */
 render();
-if (!S.profile.onboarded) openOnb();
+if (!S.profile.onboarded) openOnb(); else checkStart();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
