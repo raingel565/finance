@@ -823,7 +823,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.3.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.3.1</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1108,10 +1108,13 @@ let deferredInstall = null;
 const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 function installCardHtml() {
   if (standalone()) return '';
-  return `<div class="card"><div class="card-t" style="margin-bottom:8px">📲 Установить на телефон</div>
+  const path = location.pathname, nested = /life-tracker/i.test(path), isFile = location.protocol === 'file:';
+  const diag = isFile ? '<div class="banner red" style="margin:10px 0 0"><span class="ic">⚠️</span><span>Открыт файл с телефона, а не сайт. Установка работает только с адреса GitHub Pages.</span></div>'
+    : nested ? `<div class="banner red" style="margin:10px 0 0"><span class="ic">⚠️</span><span>Приложение лежит внутри Life Tracker (<b>${esc(path)}</b>). Chrome считает его частью уже установленного Life Tracker и предлагает только ярлык. Загрузите файлы в <b>отдельный репозиторий</b>, например «finance», — адрес станет …github.io/finance/.</span></div>` : '';
+  return `<div class="card"><div class="card-t" style="margin-bottom:8px">📲 Установить на телефон</div>${diag}
     ${deferredInstall ? `<p class="sub" style="margin-bottom:12px">Иконка на рабочем столе, полный экран, работа без интернета.</p><button class="btn block" data-act="install">Установить приложение</button>`
       : `<p class="sub">Android, Chrome: меню <b>⋮</b> → <b>«Установить приложение»</b> (или «Добавить на главный экран» → «Установить»).<br>iPhone, Safari: «Поделиться» → «На экран Домой».</p>
-         <p class="note" style="margin-top:8px">Открывайте именно сайт на GitHub Pages (https://…github.io/…), а не скачанный файл — иначе установка недоступна.</p>`}</div>`;
+         <p class="note" style="margin-top:8px">Если Chrome пишет «уже установлено» и предлагает только ярлык — удалите старый ярлык «Финансы» с рабочего стола, закройте Chrome и откройте сайт снова. Должна появиться кнопка «Установить».</p>`}</div>`;
 }
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; render(); });
 window.addEventListener('appinstalled', () => { deferredInstall = null; toast('Приложение установлено'); render(); });
