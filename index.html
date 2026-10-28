@@ -126,6 +126,8 @@ input,select{font:inherit;color:inherit}
 .monthnav button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line2);font-size:18px;color:var(--muted)}
 .monthnav span{font-weight:600;min-width:110px;text-align:center;text-transform:capitalize}
 .sum3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sum3 .metric{padding:11px 10px}
+.sum3 .metric .n{font-size:16px}
 .day-h{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin:18px 4px 6px}
 .filters{display:flex;gap:6px;overflow-x:auto;margin:14px 0 4px;scrollbar-width:none}
 .filters button{height:32px;padding:0 12px;border-radius:99px;border:1px solid var(--line2);font-size:13px;color:var(--muted);white-space:nowrap}
@@ -141,7 +143,7 @@ input,select{font:inherit;color:inherit}
 
 /* таббар */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;padding-bottom:var(--safe-b);background:rgba(8,10,15,.88);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border-top:1px solid var(--line)}
-.tabbar .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);height:var(--tabbar)}
+.tabbar .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr);height:var(--tabbar)}
 .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--dim);font-size:10.5px;font-weight:500;position:relative}
 .tab svg{width:22px;height:22px}
 .tab.on{color:var(--text)}
@@ -200,6 +202,36 @@ input,select{font:inherit;color:inherit}
 .toast{position:fixed;left:50%;bottom:calc(var(--tabbar) + var(--safe-b) + 84px);transform:translate(-50%,16px);opacity:0;z-index:80;background:#161d2a;border:1px solid var(--line2);padding:11px 16px;border-radius:12px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.5);transition:all .3s;pointer-events:none;max-width:calc(100% - 32px);text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:16px 8px}
+
+/* итерация 2 */
+.btn.gold{background:transparent;color:var(--gold);border:1px solid rgba(255,209,102,.45);box-shadow:none}
+.btn.gold-s{background:var(--gold);box-shadow:0 8px 22px -8px var(--gold)}
+.pbar{height:8px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden;margin:10px 0 6px}
+.pbar i{display:block;height:100%;border-radius:99px;background:var(--gold);box-shadow:0 0 10px rgba(255,209,102,.5);transition:width 1s}
+.plan{font-size:13px;color:var(--muted);margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);line-height:1.6}
+.plan b{color:var(--text);font-family:var(--mono)}
+.calc{margin:2px 0 14px;padding:10px 12px;border-radius:12px;background:rgba(34,227,255,.05);border:1px solid rgba(34,227,255,.2)}
+.calc .kv{font-size:13px}
+.hbar{height:6px;border-radius:6px;background:rgba(255,255,255,.07);overflow:hidden;margin:8px 0 6px}
+.hbar i{display:block;height:100%;border-radius:6px}
+.catrow{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px}
+.catrow .cn{width:96px;flex:0 0 96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.catrow .cb{flex:1;height:10px;border-radius:5px;background:rgba(255,255,255,.05);overflow:hidden}
+.catrow .cb i{display:block;height:100%;border-radius:0 5px 5px 0;background:var(--accent);opacity:.85}
+.catrow .cv{width:52px;text-align:right;font-weight:700}
+.catrow .cp{width:34px;text-align:right;color:var(--muted);font-size:11px;font-family:var(--mono)}
+.bar-meta{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:6px;gap:6px}
+details.closed summary{cursor:pointer;list-style:none;font-family:var(--mono)}
+details.closed summary::-webkit-details-marker{display:none}
+.status-card{display:flex;gap:10px;align-items:center;cursor:pointer;padding:14px 16px}
+.status-card .char{width:112px;height:176px;flex:0 0 112px;overflow:visible}
+.ch-body{transform-origin:100px 300px;transition:transform 1.2s;animation:chB var(--pulse,2s) ease-in-out infinite}
+@keyframes chB{0%,100%{scale:1 1}50%{scale:1.012 .988}}
+.hs-num{font-family:var(--mono);font-size:44px;font-weight:700;line-height:1;letter-spacing:-.03em}
+.hs-word{font-size:13px;font-weight:600;margin:4px 0 10px}
+.hs-part{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-top:5px}
+.hs-part span:first-child{flex:0 0 74px}
+.hs-part .hbar{flex:1;margin:0;height:5px}
 </style>
 </head>
 <body>
@@ -210,6 +242,7 @@ input,select{font:inherit;color:inherit}
   <header class="topbar"><h1 id="title">Сегодня</h1><div class="date" id="todayDate"></div></header>
   <section class="screen active" data-screen="home"><div id="homeBox"></div></section>
   <section class="screen" data-screen="cal"><div id="calBox"></div></section>
+  <section class="screen" data-screen="goals"><div id="goalsBox"></div></section>
   <section class="screen" data-screen="log"><div id="logBox"></div></section>
   <section class="screen" data-screen="plan"><div id="planBox"></div></section>
 </div>
@@ -219,6 +252,7 @@ input,select{font:inherit;color:inherit}
 <nav class="tabbar"><div class="in" id="tabs">
   <button class="tab on" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>Сегодня</button>
   <button class="tab" data-tab="cal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Календарь<i class="dot" id="calDot" style="display:none"></i></button>
+  <button class="tab" data-tab="goals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".8" fill="currentColor"/></svg>Цели</button>
   <button class="tab" data-tab="log"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>Журнал</button>
   <button class="tab" data-tab="plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>План</button>
 </div></nav>
@@ -284,13 +318,15 @@ const defaults = () => ({
   tx: [],         // журнал: expense / income / payment / adjust
   cats: CATS.map(c => ({ ...c })),
   holidays: [],   // свои нерабочие дни 'YYYY-MM-DD'
-  meta: { lastBackup: null }
+  goals: [],      // цели и покупки
+  meta: { lastBackup: null, limitLog: {} }
 });
 function normalize(d) {
   const b = defaults();
   if (!d || typeof d !== 'object') return b;
   const o = { ...b, ...d, profile: { ...b.profile, ...(d.profile || {}) }, meta: { ...b.meta, ...(d.meta || {}) } };
-  for (const k of ['schedule', 'tx', 'cats', 'holidays']) if (!Array.isArray(o[k])) o[k] = b[k];
+  for (const k of ['schedule', 'tx', 'cats', 'holidays', 'goals']) if (!Array.isArray(o[k])) o[k] = b[k];
+  if (!o.meta.limitLog || typeof o.meta.limitLog !== 'object') o.meta.limitLog = {};
   if (!o.cats.length) o.cats = b.cats;
   if (!o.occ || typeof o.occ !== 'object') o.occ = {};
   o.schedule = o.schedule.map(normItem);
@@ -302,7 +338,7 @@ function normItem(it) {
     shift: ['before', 'after', 'none'].includes(it.shift) ? it.shift : (it.kind === 'income' ? 'before' : 'after'),
     flexible: !!it.flexible, mode: it.mode === 'dec' ? 'dec' : 'fixed', total: it.total ? Math.round(+it.total) : null,
     startMonth: it.startMonth || ymOf(dayKey()), endMonth: it.endMonth || null, prevMonth: !!it.prevMonth,
-    overrides: it.overrides && typeof it.overrides === 'object' ? it.overrides : {}, paused: !!it.paused };
+    overrides: it.overrides && typeof it.overrides === 'object' ? it.overrides : {}, paused: !!it.paused, isDebt: !!it.isDebt };
 }
 let S = (() => { try { return normalize(JSON.parse(localStorage.getItem(KEY))); } catch (e) { return defaults(); } })();
 let ver = 0;
@@ -476,14 +512,23 @@ function forecast() {
     const first = pool[0];
     why[o.key] = first.c < pick.c ? { alt: first.c, room: first.room, worst: first.worst } : null;
   }
-  const evs = fixed.concat(flexEvs());
+  const base = fixed.concat(flexEvs());
+  const r0 = calcL(B0, base, floor);                        // лимит без целей
+  // цели с датой: к дате на карте должна быть сумма (минус уже переведённое на отдельный счёт)
+  const goalEvs = S.goals.filter(g => !g.done && g.date && gFromCard(g) > 0)
+    .map(g => ({ d: Math.max(0, diffDays(today, g.date)), a: -gFromCard(g), o: { key: 'goal|' + g.id, name: g.name, goal: g, kind: 'goal', date: g.date } }));
+  const evs = base.concat(goalEvs);
   const r = calcL(B0, evs, floor);
+  if (S.profile.onboarded && S.profile.startBalance != null) {   // лимит дня — для статистики «уложился ли»
+    const v = Math.max(0, Math.round(r.L));
+    if (S.meta.limitLog[today] !== v) { S.meta.limitLog[today] = v; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+  }
   // кассовый разрыв: первый день, когда даже без трат баланс уходит ниже остатка
   let gap = null;
   for (let d = 0; d <= H; d++) { const room = bal + r.cum[d] - floor; if (room < 0) { gap = { d, date: addDays(today, d), short: -room }; break; } }
   const flexPlan = flex.map(o => ({ o, date: place[o.key], src: incomeBefore(occ, place[o.key], o.early), why: why[o.key] }));
   const nextInc = fixed.filter(e => e.a > 0).sort((a, b) => a.d - b.d)[0] || null;
-  FC = { ver, today, bal, spent, B0, L: r.L, bind: r.bind, bindDate: addDays(today, r.bind), cum: r.cum, evs, occ, pending, overdueInc, overduePay, flexPlan, gap, nextInc };
+  FC = { ver, today, bal, spent, B0, L: r.L, L0: r0.L, bind: r.bind, bindDate: addDays(today, r.bind), cum: r.cum, evs, occ, pending, overdueInc, overduePay, flexPlan, gap, nextInc };
   return FC;
 }
 function incomeBefore(occ, date, from) {
@@ -512,7 +557,7 @@ function allocation(o) {
 }
 
 /* ======================= экраны ======================= */
-const TITLES = { home: 'Сегодня', cal: 'Календарь', log: 'Журнал', plan: 'План' };
+const TITLES = { home: 'Сегодня', cal: 'Календарь', goals: 'Цели', log: 'Журнал', plan: 'План' };
 let screen = 'home';
 function go(name) {
   screen = name;
@@ -530,6 +575,7 @@ function render() {
   if (screen === 'home') renderHome();
   if (screen === 'cal') renderCal();
   if (screen === 'log') renderLog();
+  if (screen === 'goals') renderGoals();
   if (screen === 'plan') renderPlan();
 }
 
@@ -569,12 +615,16 @@ function renderHome() {
   const col = F.gap && F.gap.d <= 31 ? 'var(--bad)' : left < 0 ? 'var(--bad)' : left < L * .3 ? 'var(--warn)' : 'var(--good)';
   document.documentElement.style.setProperty('--hc', col);
   let h = '';
+  const HS = health();
+  h += `<div class="card status-card" data-act="health">${characterHtml(HS)}
+    <div class="grow"><div class="lim-l">Финансовое здоровье</div><div class="hs-num" style="color:${scoreColor(HS.score)}">${HS.score}</div><div class="hs-word">${scoreWord(HS.score)}</div>
+      ${HS.parts.map(p => `<div class="hs-part"><span>${p.n.split(' ')[0]}</span><span class="hbar"><i style="width:${p.s * 100}%;background:${scoreColor(p.s * 100)}"></i></span></div>`).join('')}</div></div>`;
   if (F.gap) {
     h += `<div class="banner red"><span class="ic">⚠️</span><span><b>Кассовый разрыв ${longDate(F.gap.date)}</b> (${relDay(F.gap.date)}): даже без трат не хватит <b>${money(F.gap.short)}</b> на обязательные платежи.
       ${F.gap.d === 0 ? 'Проверьте баланс и неподтверждённые доходы.' : 'Стоит заранее договориться о переносе платежа или найти доход.'}</span></div>`;
   }
   h += `<div class="card hero"><div class="hero-in">
-      <div class="ring">${ringSvg(L > 0 ? left / L : 0, col)}<div class="rv"><div><b>${L > 0 ? Math.round(clamp(left / L, -9, 1) * 100) : 0}%</b>лимита</div></div></div>
+      <div class="ring">${ringSvg(L > 0 ? left / L : 0, col)}<div class="rv"><div><b>${L > 0 ? Math.round(clamp(left / L) * 100) : 0}%</b>лимита</div></div></div>
       <div class="grow"><div class="lim-l">Можно сегодня</div>
         <div class="lim-v" style="color:${col}">${left < 0 ? '−' : ''}${fmt(Math.abs(Math.round(left)))} <span style="font-size:18px">₸</span></div>
         <div class="lim-s">лимит <b>${fmt(Math.round(L))}</b>/день<br>потрачено <b>${fmt(F.spent)}</b></div></div></div>
@@ -588,6 +638,8 @@ function renderHome() {
   // подтверждения: просроченное и сегодняшнее
   const todayOcc = F.pending.filter(o => (o.kind === 'payment' && !o.flex && o.date === today) || (o.kind === 'income' && o.early <= today && o.date >= today));
   const due = F.overdueInc.concat(F.overduePay, todayOcc);
+  const dueGoals = activeGoals().filter(g => g.date && g.date <= today && !g.cushion);
+  if (dueGoals.length) h += `<div class="card"><div class="card-t" style="margin-bottom:8px;color:var(--gold)">🎯 Срок цели</div><ul class="list">${dueGoals.map(g => `<li><div class="grow"><div>${esc(g.name)} <span class="v" style="font-size:13px">${fmt(g.amount)}</span></div><div class="d">${g.date < today ? 'срок прошёл ' + shortDate(g.date) : 'сегодня'} — пока не отмечена, деньги держатся в лимите</div></div><button class="btn sm green" data-g="buy" data-id="${g.id}">Куплено</button><button class="btn sm ghost" data-g="edit" data-id="${g.id}">⋯</button></li>`).join('')}</ul></div>`;
   if (due.length) {
     h += `<div class="card"><div class="card-h"><span class="card-t" style="color:var(--accent)">Требует отметки</span><span class="sub mono">${due.length}</span></div>
       <ul class="list">${due.map(o => {
@@ -624,6 +676,7 @@ function renderHome() {
   const todayTx = S.tx.filter(t => t.date === today).sort((a, b) => a.ts < b.ts ? 1 : -1);
   h += `<div class="card"><div class="card-h"><span class="card-t">Операции сегодня</span><button class="link" data-act="log">журнал</button></div>
     ${todayTx.length ? `<ul class="list">${todayTx.map(txRow).join('')}</ul>` : '<p class="sub">Пока пусто. Кнопка «+ Трата» внизу.</p>'}</div>`;
+  h += installCardHtml();
   $('#homeBox').innerHTML = h;
 }
 function bindNote(F) {
@@ -636,10 +689,10 @@ function bindNote(F) {
 
 /* ---------- журнал ---------- */
 let logYm = null, logFilter = 'all';
-const TX_T = { expense: 'Трата', income: 'Доход', payment: 'Платёж', adjust: 'Корректировка' };
+const TX_T = { expense: 'Трата', income: 'Доход', payment: 'Платёж', adjust: 'Корректировка', save: 'Накопление' };
 function txRow(t) {
   const c = t.type === 'expense' ? cat(t.cat) : null;
-  const e = t.type === 'expense' ? c.e : t.type === 'income' ? '💰' : t.type === 'payment' ? '📌' : '⚖️';
+  const e = t.type === 'expense' ? c.e : t.type === 'income' ? '💰' : t.type === 'save' ? '🏦' : t.goalId ? '🎯' : t.type === 'payment' ? '📌' : '⚖️';
   const title = t.type === 'expense' ? (t.note || c.n) : t.name || TX_T[t.type];
   const sub = [t.type === 'expense' && t.note ? c.n : TX_T[t.type], t.noBal ? 'без изменения баланса' : '', t.occKey && txBym(t) !== bymOfDate(t.date) ? 'бюджет ' + MON_G2(txBym(t)) : ''].filter(Boolean).join(' · ');
   const sign = txSign(t) * t.amount;
@@ -659,9 +712,10 @@ function renderLog() {
     <div class="sum3"><div class="metric"><div class="l">Доходы</div><div class="n pos">${sMoney(inc)}</div></div>
       <div class="metric"><div class="l">Траты</div><div class="n">${sMoney(exp)}</div></div>
       <div class="metric"><div class="l">Платежи</div><div class="n">${sMoney(pay)}</div></div></div>
-    <div class="filters">${[['all', 'Все'], ['expense', 'Траты'], ['income', 'Доходы'], ['payment', 'Платежи'], ['adjust', 'Корректировки']].map(([k, l]) => `<button data-lf="${k}" class="${k === logFilter ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="filters">${[['all', 'Все'], ['expense', 'Траты'], ['income', 'Доходы'], ['payment', 'Платежи'], ['save', 'Накопления'], ['adjust', 'Корректировки']].map(([k, l]) => `<button data-lf="${k}" class="${k === logFilter ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="row" style="margin-top:10px"><button class="btn sm ghost grow" data-act="addIncome">+ Доход</button><button class="btn sm ghost grow" data-act="adjust">Сверить баланс</button></div>
   </div>`;
+  if (logFilter === 'all' || logFilter === 'expense') h += statsHtml(logYm);
   const days = Object.keys(byDay).sort().reverse();
   if (!days.length) h += '<p class="empty">Операций нет</p>';
   for (const d of days) {
@@ -682,13 +736,19 @@ function renderCal() {
     const ym = ymAdd(cb, i);
     const vis = F.occ.filter(o => o.bym === ym)
       .sort((a, b) => planDate(a) < planDate(b) ? -1 : planDate(a) > planDate(b) ? 1 : a.kind === 'income' ? -1 : 1);
-    if (!vis.length) continue;
+    const gl = S.goals.filter(g => g.date && !g.done && bymOfDate(g.date) === ym);
+    if (!vis.length && !gl.length) continue;
+    const gOut = gl.reduce((s, g) => s + gFromCard(g), 0);
     const inc = vis.filter(o => o.kind === 'income' && o.status !== 'skip').reduce((s, o) => s + o.amount, 0);
     const out = vis.filter(o => o.kind === 'payment' && o.status !== 'skip').reduce((s, o) => s + o.amount, 0);
     const days = diffDays(bStart(ym), bEnd(ym)) + 1;
     h += `<div class="month-h"><h2>${ymNameShort(ym)} <span class="sub" style="font-size:12px;font-weight:400;text-transform:none">${bRange(ym)}</span></h2><span class="sub"><span class="pos">+${sMoney(inc)}</span> · −${sMoney(out)}</span></div>
       <p class="note" style="margin:-4px 4px 8px">Свободно на жизнь: <b class="mono" style="color:var(--text)">${money(inc - out)}</b>${inc - out > 0 ? ` · ≈ ${fmt(Math.round((inc - out) / days))} ₸/день на ${days} дн` : ''}</p>
-      <div class="card" style="padding:4px 12px"><ul class="list">${vis.map(o => calRow(o, today)).join('')}</ul></div>`;
+      ${gOut ? `<p class="note" style="margin:-4px 4px 8px">🎯 Цели в этом месяце: <b class="mono" style="color:var(--gold)">−${fmt(gOut)}</b> (уже заложены в лимит)</p>` : ''}
+      <div class="card" style="padding:4px 12px"><ul class="list">${vis.map(o => ({ d: planDate(o), h: calRow(o, today) }))
+        .concat(gl.map(g => ({ d: g.date, h: `<li class="tap occ-row" data-g="edit" data-id="${g.id}"><div class="cal-day ${isOff(g.date) ? 'off' : ''}"><b>${+g.date.slice(8)}</b><span>${wd(g.date)}</span></div>
+          <div class="grow"><div>🎯 ${esc(g.name)}</div><div class="d">цель${gMoved(g) ? ` · ${fmt(gMoved(g))} уже на отдельном счёте` : ''}</div></div><div class="v" style="color:var(--gold)">−${fmt(gFromCard(g))}</div></li>` })))
+        .sort((x, y) => x.d < y.d ? -1 : x.d > y.d ? 1 : 0).map(x => x.h).join('')}</ul></div>`;
   }
   h += `<p class="note" style="margin:6px 4px">Месяц — бюджетный: начинается с первой зарплаты месяца. Записи «за прошлый месяц» (аренда, кредиты и фриланс начала месяца) — в бюджете предыдущего. Даты с учётом выходных и праздников РК, доходы с «окном» — по последнему дню окна.</p>`;
   $('#calBox').innerHTML = h;
@@ -725,6 +785,7 @@ function ruleText(it) {
   if (it.mode === 'dec') parts.push(`убывает до ~${sMoney(decLast(it))} к ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
   else if (it.endMonth) parts.push(`до ${MON_S[+it.endMonth.slice(5) - 1]} ${it.endMonth.slice(0, 4)}`);
   if (it.prevMonth && !it.flexible) parts.push('→ бюджет прошлого месяца');
+  if (it.isDebt) parts.push('долг');
   if (it.paused) parts.push('на паузе');
   return parts.join(' · ');
 }
@@ -738,7 +799,7 @@ function renderPlan() {
   const pDays = diffDays(bStart(pb), bEnd(pb)) + 1;
   const row = it => `<li class="tap plan-row" data-item="${it.id}"><span class="emo">${it.kind === 'income' ? '💰' : it.flexible ? '🤝' : '📌'}</span>
     <div class="grow"><div>${esc(it.name)}</div><div class="rule">${ruleText(it)}</div></div><span class="v ${it.kind === 'income' ? 'pos' : ''}">${fmt(it.amount)}</span></li>`;
-  let h = `<div class="card"><div class="sum3">
+  let h = installCardHtml() + `<div class="card"><div class="sum3">
       <div class="metric"><div class="l">Доходы/мес</div><div class="n pos">${sMoney(mInc)}</div></div>
       <div class="metric"><div class="l">Платежи/мес</div><div class="n">${sMoney(mPay)}</div></div>
       <div class="metric"><div class="l">Свободно</div><div class="n">${sMoney(mInc - mPay)}</div></div></div>
@@ -751,6 +812,7 @@ function renderPlan() {
     <div class="sec-h"><h2>Настройки</h2></div>
     <div class="card">
       <div class="set-row"><div><div class="l">Неприкосновенный остаток</div><div class="h">ниже этой суммы лимит не опустит баланс</div></div><input id="sFloor" inputmode="numeric" data-money value="${fmt(S.profile.floor || 0)}"></div>
+      <div class="set-row tap" data-g="min" style="cursor:pointer"><div><div class="l">Минимум на жизнь</div><div class="h">${fmt(minDaily())} ₸/день${S.profile.minDaily ? '' : ' · авто'} — для целей «без ущерба»</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="cats" style="cursor:pointer"><div><div class="l">Категории трат</div><div class="h">${S.cats.map(c => c.e).join(' ')}</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="hol" style="cursor:pointer"><div><div class="l">Праздники и выходные</div><div class="h">праздники РК + ${S.holidays.length} своих</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="adjust" style="cursor:pointer"><div><div class="l">Баланс</div><div class="h">${money(balance())} · сверить с картой</div></div><span class="sub">›</span></div>
@@ -761,15 +823,310 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · этап 1 · v0.2.1</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.3.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
 
+/* ======================= цели ======================= */
+const findGoal = id => S.goals.find(g => g.id === id);
+const gSaved = g => (g.ops || []).reduce((s, o) => s + o.amount, 0);
+const gMoved = g => (g.ops || []).filter(o => o.moved).reduce((s, o) => s + o.amount, 0);
+const gFromCard = g => Math.max(0, g.amount - gMoved(g));     // сколько к дате должно быть на карте
+const activeGoals = () => S.goals.filter(g => !g.done);
+const minDaily = () => S.profile.minDaily || Math.max(1000, Math.round(Math.max(0, forecast().L0) * 0.85 / 100) * 100);
+
+// самая ранняя дата, когда можно потратить amount с карты, не опуская лимит ниже минимума на жизнь
+function earliestSafe(amount, excludeKey) {
+  const F = forecast(), floor = S.profile.floor || 0, need = minDaily();
+  const base = F.evs.filter(e => e.o.key !== excludeKey);
+  if (amount <= 0) return { date: F.today, L: calcL(F.B0, base, floor).L };
+  for (let d = 0; d <= H; d++) {
+    const L = calcL(F.B0, base.concat({ d, a: -amount, o: { key: '_', name: '' } }), floor).L;
+    if (L >= need) return { date: addDays(F.today, d), L };
+  }
+  return null;
+}
+// лимит с целью и без неё
+function goalImpact(amount, date, excludeKey) {
+  const F = forecast(), floor = S.profile.floor || 0;
+  const base = F.evs.filter(e => e.o.key !== excludeKey);
+  const L0 = calcL(F.B0, base, floor).L;
+  if (!date || amount <= 0) return { L0, L1: L0, delta: 0 };
+  const d = Math.max(0, diffDays(F.today, date));
+  const L1 = calcL(F.B0, base.concat({ d, a: -amount, o: { key: '_', name: '' } }), floor).L;
+  return { L0, L1, delta: L0 - L1 };
+}
+const monthsTo = date => Math.max(1, diffDays(dayKey(), date) / 30.44);
+
+function goalCard(g) {
+  const saved = gSaved(g), p = g.amount ? clamp(saved / g.amount) : 0, F = forecast();
+  const fromCard = gFromCard(g);
+  let plan = '';
+  if (g.date) {
+    const imp = goalImpact(fromCard, g.date, 'goal|' + g.id);
+    const late = g.date < F.today;
+    plan = `<div class="plan">${late ? `<b style="color:var(--bad)">Срок прошёл ${longDate(g.date)}</b>` : `К <b>${longDate(g.date)}</b> · ${relDay(g.date)}`}
+      ${!late && g.amount > saved ? `<br>Откладывать ≈ <b>${fmt(Math.round((g.amount - saved) / monthsTo(g.date)))}</b> ₸/мес` : ''}
+      <br>Цена для лимита: <b>−${fmt(Math.round(imp.delta))}</b> ₸/день${imp.L1 < minDaily() ? ` <span style="color:var(--warn)">· ниже минимума на жизнь (${fmt(minDaily())})</span>` : ''}</div>`;
+  } else {
+    const es = earliestSafe(fromCard, 'goal|' + g.id);
+    plan = `<div class="plan">${es ? `Без ущерба можно к <b>${longDate(es.date)}</b> (${relDay(es.date)}) — лимит останется ≥ ${fmt(minDaily())} ₸/день` : 'В ближайший год без ущерба не получится — уменьшите сумму или минимум на жизнь'}
+      <br><span style="color:var(--muted)">Без даты цель не влияет на лимит.</span></div>
+      ${es ? `<button class="btn sm ghost block" style="margin-top:10px" data-g="plan" data-id="${g.id}" data-date="${es.date}">📌 Запланировать на ${longDate(es.date)}</button>` : ''}`;
+  }
+  return `<div class="card">
+    <div class="card-h"><span style="font-weight:600;font-size:16px">${g.cushion ? '🛡' : '🎯'} ${esc(g.name)}</span>${g.date ? `<span class="chip-st ${g.date < F.today ? 'late' : 'flex'}">${shortDate(g.date)}</span>` : '<span class="chip-st">без даты</span>'}</div>
+    <div class="big">${fmt(saved)} <small>/ ${fmt(g.amount)} ₸</small></div>
+    <div class="pbar"><i style="width:${p * 100}%"></i></div>
+    <div class="sub" style="font-size:12px">${Math.round(p * 100)}%${gMoved(g) ? ` · на отдельном счёте ${fmt(gMoved(g))}` : ''}</div>
+    ${plan}
+    <div class="row" style="margin-top:12px">
+      <button class="btn sm gold grow" data-g="save" data-id="${g.id}">Отложить</button>
+      ${g.cushion ? '' : `<button class="btn sm green grow" data-g="buy" data-id="${g.id}">Куплено</button>`}
+      <button class="btn sm ghost" data-g="edit" data-id="${g.id}" aria-label="Изменить">⋯</button>
+    </div></div>`;
+}
+function renderGoals() {
+  const F = forecast(), gs = activeGoals(), done = S.goals.filter(g => g.done);
+  let h = '';
+  if (waiting()) h += '<div class="banner yel"><span class="ic">📅</span><span>Учёт ещё не начался — расчёты по целям приблизительные (баланс неизвестен).</span></div>';
+  h += `<div class="card"><div class="sum3">
+      <div class="metric"><div class="l">Лимит сейчас</div><div class="n">${fmt(Math.max(0, Math.round(F.L)))}</div></div>
+      <div class="metric"><div class="l">Без целей</div><div class="n">${fmt(Math.max(0, Math.round(F.L0)))}</div></div>
+      <div class="metric"><div class="l">Минимум</div><div class="n tap" data-g="min" style="cursor:pointer">${fmt(minDaily())} ✎</div></div></div>
+    <p class="note" style="margin-top:10px">Цели с датой уже заложены в дневной лимит: деньги на них копятся сами. «Минимум» — ниже этого лимита цели не опускают («без ущерба»).</p></div>
+    <div class="sec-h"><h2>Цели и покупки</h2><button class="add-btn" data-g="new">+ Цель</button></div>`;
+  h += gs.length ? gs.map(goalCard).join('') : `<div class="card"><p class="sub">Налоги, техника, отпуск, подушка безопасности. Укажите сумму — приложение подскажет самую раннюю дату, когда это возможно без ущерба для жизни.</p>
+    <button class="btn block" style="margin-top:12px" data-g="new">Добавить цель</button></div>`;
+  if (done.length) h += `<details class="closed"><summary class="sub" style="padding:6px 4px">Выполнено (${done.length}) ▾</summary>
+    <div class="card" style="padding:4px 14px"><ul class="list">${done.map(g => `<li class="tap" data-g="edit" data-id="${g.id}"><span class="emo">✅</span><div class="grow"><div>${esc(g.name)}</div><div class="d">${longDate(g.done)}</div></div><span class="v">${fmt(g.amount)}</span></li>`).join('')}</ul></div></details>`;
+  $('#goalsBox').innerHTML = h;
+}
+function onGoalAct(e) {
+  const b = e.target.closest('[data-g]'); if (!b) return;
+  const { g: a, id } = b.dataset;
+  if (a === 'new') openGoalForm();
+  if (a === 'edit') openGoalForm(id);
+  if (a === 'save') openGoalSave(id);
+  if (a === 'buy') openGoalBuy(id);
+  if (a === 'min') openMinDaily();
+  if (a === 'plan') { const g = findGoal(id); g.date = b.dataset.date; afterChange(`«${g.name}» запланирована на ${longDate(g.date)} — лимит пересчитан`); }
+}
+function openGoalForm(id) {
+  const g = id ? findGoal(id) : null;
+  const d = g ? { ...g } : { name: '', amount: 0, date: '', cushion: false };
+  openSheet(`<h2>${g ? (g.done ? 'Выполненная цель' : 'Цель') : 'Новая цель'}</h2><p class="sub">${g ? '' : 'Покупка, налоги, отпуск или подушка безопасности'}</p>
+    <div class="field"><label>Название</label><input id="gfName" class="txt" maxlength="40" placeholder="Налоги" value="${esc(d.name)}"></div>
+    <div class="field"><label>Сумма</label><input id="gfAmt" inputmode="numeric" data-money placeholder="300 000" value="${d.amount ? fmt(d.amount) : ''}"><span class="u">₸</span></div>
+    <div class="field"><label>К какой дате (необязательно)</label><input id="gfDate" type="date" min="${dayKey()}" value="${d.date || ''}"></div>
+    <label class="toggle"><span>Подушка безопасности<small>копится и не тратится — учитывается в индексе здоровья</small></span><input type="checkbox" id="gfCush" ${d.cushion ? 'checked' : ''}></label>
+    <div class="calc" id="gfCalc"></div>
+    <button class="btn block" id="gfOk">${g ? 'Сохранить' : 'Добавить'}</button>
+    ${g ? `<button class="btn ghost block" style="margin-top:8px" id="gfHist">История (${(g.ops || []).length})</button><button class="btn danger block" style="margin-top:8px" id="gfDel">Удалить цель</button>` : ''}`);
+  if (!g) setTimeout(() => $('#gfName').focus(), 260);
+  const calc = () => {
+    const amt = parseMoney($('#gfAmt').value) || 0, date = $('#gfDate').value;
+    if (!amt) { $('#gfCalc').innerHTML = '<p class="note">Введите сумму — покажу, как цель повлияет на лимит.</p>'; return; }
+    const fromCard = Math.max(0, amt - (g ? gMoved(g) : 0)), key = g ? 'goal|' + g.id : '_none';
+    const es = earliestSafe(fromCard, key);
+    let h = `<div class="kv"><span>Самая ранняя дата без ущерба</span><span>${es ? shortDate(es.date) : '> года'}</span></div>`;
+    if (date) {
+      const imp = goalImpact(fromCard, date, key), ok = imp.L1 >= minDaily();
+      h += `<div class="kv"><span>Лимит сейчас → с целью</span><span>${fmt(Math.round(imp.L0))} → <b style="color:${ok ? 'var(--good)' : 'var(--bad)'}">${fmt(Math.max(0, Math.round(imp.L1)))}</b></span></div>
+        <div class="kv"><span>Откладывать в месяц</span><span>${fmt(Math.round(Math.max(0, amt - (g ? gSaved(g) : 0)) / monthsTo(date)))}</span></div>
+        ${ok ? '' : `<p class="note" style="color:var(--warn);margin-top:6px">⚠️ Лимит опустится ниже минимума на жизнь (${fmt(minDaily())}).${es ? ` Безопасная дата — ${longDate(es.date)}.` : ''}</p>`}`;
+    } else h += '<p class="note" style="margin-top:6px">Без даты цель не влияет на лимит — можно запланировать позже на рекомендованную дату.</p>';
+    $('#gfCalc').innerHTML = h;
+  };
+  sheetInput = e => { if (['gfAmt', 'gfDate'].includes(e.target.id)) calc(); };
+  $('#gfDate').onchange = calc; calc();
+  $('#gfOk').onclick = () => {
+    const name = $('#gfName').value.trim(), amount = parseMoney($('#gfAmt').value);
+    if (!name) return shake($('#gfName'));
+    if (!amount || amount <= 0) return shake($('#gfAmt'));
+    const rec = g || { id: uid(), ops: [], done: null, createdAt: new Date().toISOString() };
+    Object.assign(rec, { name, amount, date: $('#gfDate').value || null, cushion: $('#gfCush').checked });
+    if (!g) S.goals.push(rec);
+    afterChange(g ? 'Сохранено, лимит пересчитан' : `Цель «${name}» добавлена`);
+  };
+  if (g) {
+    $('#gfDel').onclick = () => { if (confirm(`Удалить цель «${g.name}»? Переводы на отдельный счёт останутся в журнале.`)) { S.goals = S.goals.filter(x => x.id !== g.id); afterChange('Цель удалена'); } };
+    $('#gfHist').onclick = () => openGoalHist(g.id);
+  }
+}
+function openGoalHist(id) {
+  const g = findGoal(id);
+  openSheet(`<h2>${esc(g.name)}</h2><p class="sub">Отложено ${fmt(gSaved(g))} из ${fmt(g.amount)} ₸</p>
+    ${(g.ops || []).length ? `<ul class="list">${[...g.ops].reverse().map(o => `<li><div class="grow"><div class="mono" style="font-weight:700">+${fmt(o.amount)}</div><div class="d">${longDate(o.date)} · ${o.moved ? 'на отдельный счёт' : 'остались на карте'}</div></div><button class="link" data-gh="${o.id}">удалить</button></li>`).join('')}</ul>` : '<p class="empty">Пока ничего не отложено</p>'}
+    <button class="btn ghost block" style="margin-top:12px" id="ghBack">Назад</button>`);
+  $('#ghBack').onclick = () => openGoalForm(id);
+  sheetHandler = e => {
+    const b = e.target.closest('[data-gh]'); if (!b || !confirm('Удалить запись?')) return;
+    const op = g.ops.find(o => o.id === b.dataset.gh);
+    if (op && op.txId) S.tx = S.tx.filter(t => t.id !== op.txId);
+    g.ops = g.ops.filter(o => o.id !== b.dataset.gh); save(); render(); openGoalHist(id);
+  };
+}
+function openGoalSave(id) {
+  const g = findGoal(id), left = Math.max(0, g.amount - gSaved(g));
+  openSheet(`<h2>Отложить: ${esc(g.name)}</h2><p class="sub">Осталось ${fmt(left)} ₸</p>
+    <div class="field"><input id="gsAmt" class="huge" inputmode="numeric" data-money placeholder="${fmt(Math.min(left, 50000))}"><span class="u">₸</span></div>
+    <label class="toggle"><span>Перевёл на отдельный счёт<small>депозит, копилка — баланс карты уменьшится, но это не трата</small></span><input type="checkbox" id="gsMoved" checked></label>
+    <p class="note" style="margin:-6px 0 14px">Если деньги остаются на карте — выключите: это просто отметка прогресса, лимит и так держит их под цель.</p>
+    <button class="btn gold-s block" id="gsOk">Отложить</button>`);
+  const amt = $('#gsAmt'); setTimeout(() => amt.focus(), 260);
+  const ok = () => {
+    const a = parseMoney(amt.value); if (!a || a <= 0) return shake(amt);
+    const moved = $('#gsMoved').checked, op = { id: uid(), amount: a, date: dayKey(), moved };
+    if (moved) { const t = { id: uid(), ts: new Date().toISOString(), type: 'save', amount: a, date: dayKey(), name: '→ ' + g.name, goalId: g.id }; S.tx.push(t); op.txId = t.id; }
+    g.ops = (g.ops || []).concat(op);
+    const reached = gSaved(g) >= g.amount;
+    afterChange(reached ? `🎉 На «${g.name}» накоплено полностью!` : `Отложено ${fmt(a)} ₸ · ${Math.round(gSaved(g) / g.amount * 100)}%`);
+  };
+  $('#gsOk').onclick = ok; onEnter(amt, ok);
+}
+function openGoalBuy(id) {
+  const g = findGoal(id), moved = gMoved(g);
+  openSheet(`<h2>Куплено: ${esc(g.name)}</h2><p class="sub">${moved ? `${fmt(moved)} ₸ возьмётся с отдельного счёта, остальное — с карты` : 'Сумма спишется с карты'}</p>
+    <div class="field"><label>Фактическая сумма</label><input id="gbAmt" class="huge" inputmode="numeric" data-money value="${fmt(g.amount)}"><span class="u">₸</span></div>
+    <button class="btn green block" id="gbOk">Готово</button>`);
+  $('#gbOk').onclick = () => {
+    const a = parseMoney($('#gbAmt').value); if (!a || a <= 0) return shake($('#gbAmt'));
+    const fromCard = Math.max(0, a - moved);
+    if (fromCard) S.tx.push({ id: uid(), ts: new Date().toISOString(), type: 'payment', amount: fromCard, date: dayKey(), name: '🎯 ' + g.name, goalId: g.id });
+    if (moved > a) S.tx.push({ id: uid(), ts: new Date().toISOString(), type: 'income', amount: moved - a, date: dayKey(), name: 'Остаток цели «' + g.name + '» на карту' });
+    g.done = dayKey();
+    afterChange(`🎉 «${g.name}» выполнена!`);
+  };
+}
+function openMinDaily() {
+  const F = forecast();
+  openSheet(`<h2>Минимум на жизнь</h2><p class="sub">Ниже какого дневного лимита цели не должны опускать. Сейчас без целей лимит ${fmt(Math.max(0, Math.round(F.L0)))} ₸.</p>
+    <div class="field"><input id="mdAmt" class="huge" inputmode="numeric" data-money value="${fmt(minDaily())}"><span class="u">₸/день</span></div>
+    <button class="btn block" id="mdOk">Сохранить</button>
+    <button class="btn ghost block" style="margin-top:8px" id="mdAuto">Авто: 85% от лимита без целей</button>`);
+  $('#mdOk').onclick = () => { const v = parseMoney($('#mdAmt').value); if (!v || v < 0) return shake($('#mdAmt')); S.profile.minDaily = v; afterChange('Минимум сохранён'); };
+  $('#mdAuto').onclick = () => { S.profile.minDaily = null; afterChange('Минимум считается автоматически'); };
+}
+
+/* ======================= индекс финансового здоровья ======================= */
+function health() {
+  const F = forecast(), b = waiting() ? bymOfDate(S.profile.startDate) : curBym();
+  const occ = genOcc(ymAdd(b, -1), ymAdd(b, 2), true).filter(o => o.bym === b);
+  const inc = occ.filter(o => o.kind === 'income').reduce((s, o) => s + o.amount, 0);
+  const debt = occ.filter(o => o.kind === 'payment' && o.it.isDebt).reduce((s, o) => s + o.amount, 0);
+  const pays = occ.filter(o => o.kind === 'payment').reduce((s, o) => s + o.amount, 0);
+  const dti = inc ? debt / inc : 1;
+  const sDebt = clamp((0.5 - dti) / 0.3);                                       // ≤20% — отлично, ≥50% — 0
+  const cushion = S.goals.filter(g => g.cushion).reduce((s, g) => s + gSaved(g), 0);
+  const monthly = pays + Math.max(0, F.L0) * 30.44;
+  const months = monthly ? cushion / monthly : 0;
+  const sCush = clamp(months / 3);                                              // цель — 3 месяца расходов
+  const log = S.meta.limitLog || {};
+  const days = Object.keys(log).filter(k => k < F.today && k >= (S.profile.startDate || F.today)).sort().slice(-30);
+  const okDays = days.filter(k => spentOn(k) <= log[k] + 1).length;
+  const sAdh = days.length >= 3 ? okDays / days.length : 0.5;
+  const sGap = !F.gap ? 1 : F.gap.d > 31 ? 0.5 : 0;
+  const parts = [
+    { k: 'debt', n: 'Долговая нагрузка', w: 30, s: sDebt, v: `${Math.round(dti * 100)}% дохода`, tip: dti > 0.5 ? 'Больше половины дохода уходит на долги. Каждый закрытый кредит заметно поднимет индекс.' : dti > 0.35 ? 'Высокая нагрузка. По мере выплат (кредит 1 уменьшается каждый месяц) индекс будет расти. Цель — до 20%.' : dti > 0.2 ? 'Умеренно. Цель — до 20% дохода на долги.' : 'Отлично: долги не давят.' },
+    { k: 'cush', n: 'Подушка безопасности', w: 30, s: sCush, v: `${fmt(months, 1)} мес`, tip: cushion ? `Накоплено ${fmt(cushion)} ₸. Цель — 3 месяца расходов (${fmt(Math.round(monthly * 3))} ₸).` : 'Создайте цель с отметкой «Подушка безопасности» — даже 1 месяц расходов сильно снижает стресс.' },
+    { k: 'adh', n: 'Соблюдение лимита', w: 25, s: sAdh, v: days.length >= 3 ? `${okDays} из ${days.length} дн` : 'мало данных', tip: days.length >= 3 ? 'Доля дней за последний месяц, когда траты уложились в дневной лимит.' : 'Нужно хотя бы 3 дня учёта.' },
+    { k: 'gap', n: 'Кассовый разрыв', w: 15, s: sGap, v: F.gap ? longDate(F.gap.date) : 'нет', tip: F.gap ? `Не хватит ${money(F.gap.short)} на обязательные платежи.` : 'На год вперёд все платежи покрываются.' }
+  ];
+  const score = Math.round(parts.reduce((s, p) => s + p.w * p.s, 0));
+  return { score, parts, dti, months, debt, inc };
+}
+const scoreColor = s => s >= 70 ? 'var(--good)' : s >= 40 ? 'var(--warn)' : 'var(--bad)';
+const scoreWord = s => s >= 80 ? 'Отлично' : s >= 60 ? 'Устойчиво' : s >= 40 ? 'Напряжённо' : s >= 20 ? 'Под давлением' : 'Критично';
+function openHealth() {
+  const h = health();
+  openSheet(`<h2>Финансовое здоровье: ${h.score}</h2><p class="sub">${scoreWord(h.score)} · из 100 баллов</p>
+    <ul class="list">${h.parts.map(p => `<li style="display:block"><div class="row"><span class="grow" style="font-weight:600">${p.n}</span><span class="mono" style="font-size:13px">${Math.round(p.w * p.s)} / ${p.w}</span></div>
+      <div class="hbar"><i style="width:${p.s * 100}%;background:${scoreColor(p.s * 100)}"></i></div>
+      <div class="d">${p.v} — ${p.tip}</div></li>`).join('')}</ul>
+    <p class="note" style="margin-top:10px">Долги — платежи с отметкой «долг / кредит» в расписании.</p>
+    <button class="btn ghost block" style="margin-top:12px" data-close>Понятно</button>`);
+}
+
+/* ======================= персонаж ======================= */
+function charColor(t) {
+  const R = [255, 45, 85], M = [176, 92, 255], B = [0, 229, 255]; t = clamp(t);
+  const c = t < .5 ? R.map((v, i) => v + (M[i] - v) * t / .5) : M.map((v, i) => v + (B[i] - v) * (t - .5) / .5);
+  return c.map(Math.round);
+}
+function characterHtml(h) {
+  const t = h.score / 100, c = charColor(t), col = `rgb(${c})`, slump = 1 - t;
+  const debtM = h.debt;
+  const dots = Math.min(10, Math.round(h.months * 3));
+  const orbit = Array.from({ length: dots }, (_, i) => `<circle r="3.2" fill="#ffd166"><animateMotion dur="9s" begin="-${(i * 9 / Math.max(1, dots)).toFixed(2)}s" repeatCount="indefinite" path="M100 200 m-86 0 a86 22 0 1 0 172 0 a86 22 0 1 0 -172 0"/></circle>`).join('');
+  return `<svg class="char" viewBox="0 0 200 320" style="--cc:${col};--pulse:${(1.1 + t * 3).toFixed(2)}s">
+    <ellipse cx="100" cy="306" rx="60" ry="7" fill="${col}" opacity=".25"/>
+    <g class="ch-body" style="transform:translateY(${(slump * 10).toFixed(1)}px) rotate(${(slump * 3).toFixed(1)}deg) scaleY(${(1 - slump * .07).toFixed(3)})">
+      ${debtM > 0 ? `<g transform="translate(0 ${-4})"><rect x="58" y="-2" width="84" height="26" rx="8" fill="${col}" opacity=".95"/><text x="100" y="15" text-anchor="middle" style="font:700 11px var(--mono);fill:#06080c">${sMoney(debtM)}/мес</text></g>` : ''}
+      <g style="filter:drop-shadow(0 0 ${(8 + t * 14).toFixed(0)}px ${col})">
+        <circle cx="100" cy="66" r="24" fill="${col}"/>
+        <path fill="${col}" d="M100 96 C72 96 54 109 50 137 L42 204 C41 214 54 216 56 206 L64 154 L66 288 C66 298 83 298 84 288 L91 210 L109 210 L116 288 C117 298 134 298 134 288 L136 154 L144 206 C146 216 159 214 158 204 L150 137 C146 109 128 96 100 96Z"/>
+      </g>
+    </g>
+    ${orbit}
+  </svg>`;
+}
+
+/* ======================= статистика месяца ======================= */
+function statsHtml(bym) {
+  const txs = S.tx.filter(t => txBym(t) === bym && t.type === 'expense');
+  if (!txs.length) return '';
+  const byCat = {};
+  for (const t of txs) byCat[t.cat] = (byCat[t.cat] || 0) + t.amount;
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const max = cats[0][1], total = txs.reduce((s, t) => s + t.amount, 0);
+  const log = S.meta.limitLog || {};
+  const from = bStart(bym) > (S.profile.startDate || '') ? bStart(bym) : S.profile.startDate;
+  const to = bEnd(bym) < dayKey() ? bEnd(bym) : dayKey();
+  const days = [];
+  for (let k = from; k <= to; k = addDays(k, 1)) days.push({ k, s: spentOn(k), L: log[k] ?? null });
+  const dmax = Math.max(1, ...days.map(d => Math.max(d.s, d.L || 0)));
+  const over = days.filter(d => d.L != null && d.s > d.L + 1).length;
+  const W = 320, Hh = 110, bw = Math.max(3, Math.min(16, (W - 10) / days.length - 3));
+  const step = (W - 10) / Math.max(1, days.length);
+  const bars = days.map((d, i) => {
+    const x = 5 + i * step + (step - bw) / 2, h = d.s / dmax * (Hh - 14), isOver = d.L != null && d.s > d.L + 1;
+    return `<rect x="${x.toFixed(1)}" y="${(Hh - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="${isOver ? 'var(--bad)' : 'var(--accent)'}" opacity="${d.k === dayKey() ? .55 : .9}"><title>${shortDate(d.k)}: ${fmt(d.s)} ₸${d.L != null ? ' / лимит ' + fmt(d.L) : ''}</title></rect>`
+      + (d.L != null ? `<line x1="${(x - 1).toFixed(1)}" x2="${(x + bw + 1).toFixed(1)}" y1="${(Hh - d.L / dmax * (Hh - 14)).toFixed(1)}" y2="${(Hh - d.L / dmax * (Hh - 14)).toFixed(1)}" stroke="#e8edf5" stroke-opacity=".55" stroke-width="1.5"/>` : '');
+  }).join('');
+  return `<div class="card"><div class="card-h"><span class="card-t">Траты по категориям</span><span class="sub mono">${fmt(total)} ₸</span></div>
+      ${cats.map(([id, v]) => { const c = cat(id); return `<div class="catrow"><span class="emo">${c.e}</span><span class="cn">${esc(c.n)}</span><span class="cb"><i style="width:${v / max * 100}%"></i></span><span class="cv mono">${sMoney(v)}</span><span class="cp">${Math.round(v / total * 100)}%</span></div>`; }).join('')}
+    </div>
+    <div class="card"><div class="card-h"><span class="card-t">Траты по дням</span><span class="sub mono">${over ? `<span style="color:var(--bad)">▲ ${over}</span> выше лимита` : 'в рамках лимита'}</span></div>
+      <svg viewBox="0 0 ${W} ${Hh + 2}" style="width:100%;height:auto;display:block">${bars}<line x1="0" x2="${W}" y1="${Hh + .5}" y2="${Hh + .5}" stroke="rgba(255,255,255,.12)"/></svg>
+      <div class="bar-meta"><span>${shortDate(from)}</span><span>━ лимит дня · <span style="color:var(--bad)">■</span> перерасход</span><span>${shortDate(to)}</span></div></div>`;
+}
+
+/* ======================= установка ======================= */
+let deferredInstall = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+function installCardHtml() {
+  if (standalone()) return '';
+  return `<div class="card"><div class="card-t" style="margin-bottom:8px">📲 Установить на телефон</div>
+    ${deferredInstall ? `<p class="sub" style="margin-bottom:12px">Иконка на рабочем столе, полный экран, работа без интернета.</p><button class="btn block" data-act="install">Установить приложение</button>`
+      : `<p class="sub">Android, Chrome: меню <b>⋮</b> → <b>«Установить приложение»</b> (или «Добавить на главный экран» → «Установить»).<br>iPhone, Safari: «Поделиться» → «На экран Домой».</p>
+         <p class="note" style="margin-top:8px">Открывайте именно сайт на GitHub Pages (https://…github.io/…), а не скачанный файл — иначе установка недоступна.</p>`}</div>`;
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; render(); });
+window.addEventListener('appinstalled', () => { deferredInstall = null; toast('Приложение установлено'); render(); });
+async function doInstall() {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  const r = await deferredInstall.userChoice.catch(() => null);
+  deferredInstall = null; render();
+  if (r && r.outcome === 'accepted') toast('Установлено — ищите иконку «Финансы»');
+}
+
 /* ======================= шторки ======================= */
-let sheetHandler = null;
+let sheetHandler = null, sheetInput = null;
 function openSheet(html) {
-  sheetHandler = null;
+  sheetHandler = null; sheetInput = null;
   $('#sheetBody').innerHTML = html;
   $('#sheetBg').classList.add('open'); $('#sheet').classList.add('open');
 }
@@ -784,6 +1141,7 @@ function afterChange(msg) { save(); closeSheet(); render(); if (msg) toast(msg);
 function openTx(id, preset = {}) {
   const t = id ? S.tx.find(x => x.id === id) : null;
   if (t && t.occKey) return openOcc(t.occKey);
+  if (t && t.goalId && findGoal(t.goalId)) return t.type === 'save' ? openGoalHist(t.goalId) : openGoalForm(t.goalId);
   if (t && t.type === 'adjust') {
     openSheet(`<h2>Корректировка баланса</h2><p class="sub">${longDate(t.date)} · ${esc(t.name || 'Сверка баланса')}</p>
       <div class="kv"><span>Изменение</span><span>${t.amount > 0 ? '+' : '−'}${fmt(Math.abs(t.amount))} ₸</span></div>
@@ -995,6 +1353,7 @@ function openItem(id, kindNew) {
       </div>
       ${dateMode === 'flex' ? '<p class="note" style="margin:-4px 0 12px">Окно — бюджетный месяц: от первой зарплаты месяца до следующей.</p>'
         : `<label class="toggle"><span>Относится к прошлому месяцу<small>${inc ? 'оплата за работу прошлого месяца, приходит в начале следующего' : 'закрывается деньгами прошлого месяца (аренда 1-го, кредиты 2-го)'}</small></span><input type="checkbox" id="itPrev" ${d.prevMonth ? 'checked' : ''}></label>`}
+      ${!inc ? `<label class="toggle"><span>Долг / кредит<small>учитывается в долговой нагрузке индекса здоровья</small></span><input type="checkbox" id="itDebt" ${d.isDebt ? 'checked' : ''}></label>` : ''}
       ${old ? `<label class="toggle"><span>На паузе<small>временно не участвует в расчётах</small></span><input type="checkbox" id="itPause" ${d.paused ? 'checked' : ''}></label>` : ''}
       <button class="btn block" id="itOk">${old ? 'Сохранить' : 'Добавить'}</button>
       ${old ? '<button class="btn danger block" style="margin-top:8px" id="itDel">Удалить правило</button>' : ''}`);
@@ -1011,6 +1370,7 @@ function openItem(id, kindNew) {
     d.endMonth = $('#itEnd').value || null;
     if ($('#itPause')) d.paused = $('#itPause').checked;
     if ($('#itPrev')) d.prevMonth = $('#itPrev').checked;
+    if ($('#itDebt')) d.isDebt = $('#itDebt').checked;
   };
   handler = e => {
     const b = e.target.closest('[data-md],[data-dm],[data-sh]'); if (b) {
@@ -1193,6 +1553,7 @@ $('#fab').onclick = () => openTx(null);
 $('#sheetBg').onclick = closeSheet;
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 $('#sheetBody').addEventListener('click', e => { if (e.target.closest('[data-close]')) return closeSheet(); sheetHandler && sheetHandler(e); });
+$('#sheetBody').addEventListener('input', e => sheetInput && sheetInput(e));
 $('#importFile').onchange = e => { const f = e.target.files[0]; if (f) importData(f); e.target.value = ''; };
 document.addEventListener('input', e => {
   if (!e.target.matches('[data-money]')) return;
@@ -1203,7 +1564,9 @@ document.addEventListener('input', e => {
 $('#app').addEventListener('click', e => {
   const okb = e.target.closest('[data-occ-ok]'); if (okb) return openConfirm(okb.dataset.occOk);
   const al = e.target.closest('[data-alloc]'); if (al) return openAlloc(al.dataset.alloc);
-  const oc = e.target.closest('[data-occ]'); if (oc) {
+  const gb = e.target.closest('[data-g]'); if (gb) return onGoalAct(e);
+  const oc = e.target.closest('[data-occ]'); if (oc && oc.dataset.occ.startsWith('goal|')) return openGoalForm(oc.dataset.occ.slice(5));
+  if (oc) {
     const o = findOcc(oc.dataset.occ);
     if (o && o.kind === 'income' && !o.status && screen === 'cal') return openOccMenu(oc.dataset.occ);
     return openOcc(oc.dataset.occ);
@@ -1216,6 +1579,8 @@ $('#app').addEventListener('click', e => {
   const a = e.target.closest('[data-act]'); if (!a) return;
   const act = a.dataset.act;
   if (act === 'adjust') openAdjust();
+  if (act === 'health') openHealth();
+  if (act === 'install') doInstall();
   if (act === 'addIncome') openTx(null, { type: 'income' });
   if (act === 'log') go('log');
   if (act === 'plan') go('plan');
