@@ -1,6 +1,6 @@
 // Finance Flow — service worker
 // При каждом обновлении приложения меняйте версию, чтобы телефоны подтянули новые файлы.
-const VERSION = 'ff-v0.7.0';
+const VERSION = 'ff-v0.8.0';
 const SHELL = [
   './',
   './index.html',

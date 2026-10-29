@@ -71,6 +71,9 @@ input,select{font:inherit;color:inherit}
 .metric .n{font-family:var(--mono);font-size:18px;font-weight:700;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .metric .n small{font-size:12px;color:var(--muted);font-weight:500}
 .metric.tap{cursor:pointer}
+.dc-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:14px;border:1px solid;border-radius:16px;background:rgba(255,255,255,.02)}
+.dc-list{max-height:38vh;overflow:auto}
+.env-card{border-color:rgba(255,209,102,.3)}
 .bind{font-size:12px;color:var(--muted);margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);line-height:1.5}
 .bind b{color:#c9d2df;font-weight:600}
 
@@ -488,7 +491,7 @@ function genOcc(fromYm, toYm, all) {
 }
 
 /* ======================= баланс ======================= */
-const txSign = t => t.type === 'income' ? 1 : t.type === 'adjust' ? 1 : -1;
+const txSign = t => t.type === 'income' ? 1 : t.type === 'adjust' ? 1 : t.type === 'move' ? 0 : -1;
 const balance = () => (S.profile.startBalance || 0) + S.tx.reduce((s, t) => t.noBal ? s : s + txSign(t) * t.amount, 0);
 const spentOn = k => S.tx.filter(t => t.type === 'expense' && t.date === k && !t.noBal).reduce((s, t) => s + t.amount, 0);
 
@@ -678,7 +681,7 @@ function renderHome() {
         <div class="lim-v" style="color:${col}">${left < 0 ? '−' : ''}${fmt(Math.abs(Math.round(left)))} <span style="font-size:18px">₸</span></div>
         <div class="lim-s">лимит <b>${fmt(Math.round(L))}</b>/день<br>потрачено <b>${fmt(F.spent)}</b></div></div></div>
     <div class="hero-foot">
-      <div class="metric tap" data-act="adjust"><div class="l">Баланс ✎</div><div class="n">${money(F.bal)}</div></div>
+      ${envOn() && Math.abs(envBalance()) >= 1 ? `<div class="metric tap" data-act="adjust"><div class="l">На карте ✎</div><div class="n">${money(cardBalance())}</div><div class="sub" style="font-size:11px;margin-top:2px">+ ${fmt(Math.round(envBalance()))} в конвертах</div></div>` : `<div class="metric tap" data-act="adjust"><div class="l">Баланс ✎</div><div class="n">${money(F.bal)}</div></div>`}
       <div class="metric">${F.nextInc ? `<div class="l">След. доход</div><div class="n">${shortDate(F.nextInc.o.date)} <small>${F.nextInc.d === 0 ? 'сегодня' : F.nextInc.d + ' дн'}</small></div>` : '<div class="l">След. доход</div><div class="n">—</div>'}</div>
     </div>
     ${bindNote(F)}
@@ -711,11 +714,12 @@ function renderHome() {
   // сводка бюджетного месяца
   h += summaryHtml(ymAdd(curBym(), sumOff), true);
   // как разложены деньги, которые уже есть
+  h += envCardHtml();
   h += homeDistHtml();
 
   // сегодняшние траты
   const todayTx = S.tx.filter(t => t.date === today).sort((a, b) => a.ts < b.ts ? 1 : -1);
-  h += `<div class="card"><div class="card-h"><span class="card-t">Операции сегодня</span><button class="link" data-act="log">журнал</button></div>
+  h += `<div class="card"><div class="card-h"><span class="card-t">Операции сегодня${closedStreak() ? ` <span style="color:var(--gold)">🔥 ${closedStreak()}</span>` : ''}</span><span><button class="link" data-act="dayclose">${(S.meta.closed || {})[today] ? 'день закрыт ✓' : 'итог дня'}</button> · <button class="link" data-act="log">журнал</button></span></div>
     ${todayTx.length ? `<ul class="list">${todayTx.map(txRow).join('')}</ul>` : '<p class="sub">Пока пусто. Кнопка «+ Трата» внизу.</p>'}</div>`;
   h += installCardHtml();
   $('#homeBox').innerHTML = h;
@@ -730,15 +734,15 @@ function bindNote(F) {
 
 /* ---------- журнал ---------- */
 let logYm = null, logFilter = 'all';
-const TX_T = { expense: 'Трата', income: 'Доход', payment: 'Платёж', adjust: 'Корректировка', save: 'Накопление' };
+const TX_T = { expense: 'Трата', income: 'Доход', payment: 'Платёж', adjust: 'Корректировка', save: 'Накопление', move: 'Конверты' };
 function txRow(t) {
   const c = t.type === 'expense' ? cat(t.cat) : null;
-  const e = t.type === 'expense' ? c.e : t.type === 'income' ? '💰' : t.type === 'save' ? '🏦' : t.goalId ? '🎯' : t.type === 'payment' ? '📌' : '⚖️';
+  const e = t.type === 'expense' ? c.e : t.type === 'income' ? '💰' : t.type === 'save' ? '🏦' : t.type === 'move' ? '📥' : t.goalId ? '🎯' : t.type === 'payment' ? '📌' : '⚖️';
   const title = t.type === 'expense' ? (t.note || c.n) : t.name || TX_T[t.type];
-  const sub = [t.type === 'expense' && t.note ? c.n : TX_T[t.type], t.noBal ? 'без изменения баланса' : '', t.occKey && txBym(t) !== bymOfDate(t.date) ? 'бюджет ' + MON_G2(txBym(t)) : ''].filter(Boolean).join(' · ');
+  const sub = [t.type === 'expense' && t.note ? c.n : TX_T[t.type], t.noBal ? 'без изменения баланса' : '', t.envPart ? `из конвертов ${fmt(t.envPart)}` : '', t.type === 'move' ? (t.amount > 0 ? 'карта → конверты' : 'конверты → карта') + ', не трата' : '', t.occKey && txBym(t) !== bymOfDate(t.date) ? 'бюджет ' + MON_G2(txBym(t)) : ''].filter(Boolean).join(' · ');
   const sign = txSign(t) * t.amount;
   return `<li class="tap" data-tx="${t.id}"><span class="emo">${e}</span><div class="grow"><div>${esc(title)}</div><div class="d">${esc(sub)}</div></div>
-    <span class="v ${sign > 0 ? 'pos' : ''}" style="${t.noBal ? 'opacity:.5' : ''}">${sign > 0 ? '+' : '−'}${fmt(Math.abs(sign))}</span></li>`;
+    <span class="v ${sign > 0 ? 'pos' : ''}" style="${t.noBal || t.type === 'move' ? 'opacity:.5' : ''}">${t.type === 'move' ? (t.amount > 0 ? '→' : '←') : sign > 0 ? '+' : '−'}${fmt(Math.abs(t.type === 'move' ? t.amount : sign))}</span></li>`;
 }
 function renderLog() {
   if (!logYm) logYm = curBym();
@@ -862,6 +866,7 @@ function renderPlan() {
       <div class="set-row tap" data-g="min" style="cursor:pointer"><div><div class="l">Минимум на жизнь</div><div class="h">${fmt(minDaily())} ₸/день${S.profile.minDaily ? '' : ' · авто'} — для целей «без ущерба»</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="cats" style="cursor:pointer"><div><div class="l">Категории трат</div><div class="h">${S.cats.map(c => c.e).join(' ')}</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="hol" style="cursor:pointer"><div><div class="l">Праздники и выходные</div><div class="h">праздники РК + ${S.holidays.length} своих</div></div><span class="sub">›</span></div>
+      <div class="set-row tap" data-act="envhelp" style="cursor:pointer"><div><div class="l">📥 Физические конверты</div><div class="h">${envOn() ? `включены · лежит ${money(envBalance())}` : 'выключены — всё на карте'}</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="adjust" style="cursor:pointer"><div><div class="l">Баланс</div><div class="h">${money(balance())} · сверить с картой</div></div><span class="sub">›</span></div>
     </div>
     <div class="card"><div class="card-t" style="margin-bottom:6px">Данные</div>
@@ -870,7 +875,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.7.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.8.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1364,7 +1369,7 @@ function openSheet(html) {
   $('#sheetBody').innerHTML = html;
   $('#sheetBg').classList.add('open'); $('#sheet').classList.add('open');
 }
-function closeSheet() { $('#sheetBg').classList.remove('open'); $('#sheet').classList.remove('open'); }
+function closeSheet() { $('#sheetBg').classList.remove('open'); $('#sheet').classList.remove('open'); if (typeof returnToDayClose === 'function') returnToDayClose(); }
 let tt;
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 2800); }
 function shake(el) { vibrate([20, 40, 20]); el && el.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 260 }); }
@@ -1386,10 +1391,17 @@ function openTx(id, preset = {}) {
       if (b.dataset.adj === 'del' && confirm('Удалить корректировку?')) { S.tx = S.tx.filter(x => x.id !== t.id); afterChange('Удалено'); } };
     return;
   }
+  if (t && t.type === 'move') {
+    openSheet(`<h2>📥 ${esc(t.name)}</h2><p class="sub">${longDate(t.date)} · перевод между картой и конвертами, на лимит не влияет</p>
+      <div class="kv"><span>Сумма</span><span>${fmt(Math.abs(t.amount))} ₸</span></div>
+      <button class="btn danger block" style="margin-top:14px" id="mvDel">Удалить</button>`);
+    $('#mvDel').onclick = () => { if (confirm('Удалить перевод?')) { S.tx = S.tx.filter(x => x.id !== t.id); afterChange('Удалено'); } };
+    return;
+  }
   let type = t ? t.type : preset.type || 'expense', ctg = t ? t.cat : 'food';
   const F = forecast(), left = Math.max(0, F.L) - F.spent;
   const draw = keep => {
-    const v = keep || { amount: t ? fmt(t.amount) : '', note: t ? (t.note || t.name || '') : '', date: t ? t.date : dayKey() };
+    const v = keep || { amount: t ? fmt(t.amount) : '', note: t ? (t.note || t.name || '') : '', date: t ? t.date : preset.date || dayKey() };
     const isExp = type === 'expense';
     openSheet(`
       <h2>${t ? 'Изменить операцию' : type === 'income' ? 'Доход вне расписания' : 'Новая трата'}</h2>
@@ -1430,9 +1442,9 @@ function openTx(id, preset = {}) {
 
 /* ---------- сверка баланса ---------- */
 function openAdjust() {
-  const bal = balance();
+  const envs = envOn() ? envBalance() : 0, bal = balance() - envs;
   openSheet(`
-    <h2>Сверить баланс</h2><p class="sub">Сейчас по расчёту: <b class="mono" style="color:var(--text)">${money(bal)}</b>. Введите, сколько реально на карте — разница запишется корректировкой.</p>
+    <h2>Сверить баланс</h2><p class="sub">${envs ? 'На карте' : 'Сейчас'} по расчёту: <b class="mono" style="color:var(--text)">${money(bal)}</b>${envs ? ` (ещё ${money(envs)} в конвертах)` : ''}. Введите, сколько реально на карте — разница запишется корректировкой.</p>
     <div class="field"><input id="adAmt" class="huge" inputmode="numeric" data-money placeholder="${fmt(bal)}"><span class="u">₸</span></div>
     <div class="field"><label>Причина (необязательно)</label><input id="adNote" class="txt" maxlength="60" placeholder="забыл внести траты, кэшбэк…"></div>
     <button class="btn block" id="adOk">Сохранить</button>`);
@@ -1500,20 +1512,26 @@ function openConfirm(key, editing) {
   const inc = o.kind === 'income', tx = editing && o.txId ? S.tx.find(x => x.id === o.txId) : null;
   const today = dayKey();
   const defDate = tx ? tx.date : (planDate(o) < today ? planDate(o) : today);
+  const envAvail = envBalance() + (tx && tx.envPart ? tx.envPart : 0);
+  const envFree = Math.max(0, Math.round(envAvail - (inc ? 0 : envTarget().need(key))));
   openSheet(`<h2>${inc ? 'Доход получен' : 'Платёж проведён'}</h2><p class="sub">${esc(o.name)} · ${ymNameShort(o.ym)}</p>
     <div class="field"><label>Фактическая сумма</label><input id="cfAmt" class="huge" inputmode="numeric" data-money value="${fmt(tx ? tx.amount : o.amount)}"><span class="u">₸</span></div>
     <div class="field"><label>Дата</label><input id="cfDate" type="date" value="${defDate > today ? today : defDate}" max="${today}"></div>
     <label class="toggle"><span>Уже учтено в балансе<small>например, пришло до того, как вы ввели стартовый баланс</small></span><input type="checkbox" id="cfNoBal" ${tx && tx.noBal ? 'checked' : ''}></label>
+    ${!inc && envOn() && (envAvail > 0.5 || (tx && tx.envPart)) ? `<label class="toggle"><span>📥 Из конвертов<small>в конвертах ${money(envAvail)}${envFree < envAvail - 0.5 ? `, под этот платёж — ${money(envFree)}` : ''}; остальное — с карты</small></span><input type="checkbox" id="cfEnv" ${tx ? (tx.envPart ? 'checked' : '') : envFree > 0.5 ? 'checked' : ''}></label>` : ''}
     <button class="btn block ${inc ? 'green' : ''}" id="cfOk">Сохранить</button>`);
   const amt = $('#cfAmt');
   const ok = () => {
     const a = parseMoney(amt.value); if (!a || a <= 0) return shake(amt);
     const rec = tx || { id: uid(), ts: new Date().toISOString() };
     Object.assign(rec, { type: inc ? 'income' : 'payment', amount: a, date: $('#cfDate').value || today, name: o.name, occKey: key, noBal: $('#cfNoBal').checked });
+    const ce = $('#cfEnv');
+    if (ce && ce.checked && !rec.noBal) rec.envPart = Math.min(a, tx && tx.envPart ? Math.round(envAvail) : envFree || Math.round(envAvail)); else delete rec.envPart;
     if (!tx) S.tx.push(rec);
     S.occ[key] = { ...(S.occ[key] || {}), st: 'done', txId: rec.id };
     vibrate(20);
-    afterChange(inc ? `+${fmt(a)} ₸ — лимит пересчитан` : `−${fmt(a)} ₸ — отмечено`);
+    afterChange(inc ? `+${fmt(a)} ₸ — лимит пересчитан` : `−${fmt(a)} ₸${rec.envPart ? ` · из конвертов ${fmt(rec.envPart)}` : ''} — отмечено`);
+    if (inc && !tx && !rec.noBal) afterIncomeEnv(a);
   };
   $('#cfOk').onclick = ok; onEnter(amt, ok);
 }
@@ -1850,6 +1868,146 @@ function checkStart() {
   if (waiting() && dayKey() >= S.profile.startDate && !$('#onb').classList.contains('open')) openOnb(1, true);
 }
 
+/* ======================= физические конверты ======================= */
+// Конвертный счёт — часть ваших денег (депозит, копилка, отдельная карта). Лимит считается от общей суммы,
+// перевод «карта ↔ конверты» — не трата. Приложение знает, сколько из текущих денег уже закреплено за будущими платежами:
+// это и должно лежать в конвертах.
+const envOn = () => S.profile.envMode !== false;
+const envBalance = () => S.tx.reduce((s, t) => {
+  if (t.noBal) return s;
+  if (t.type === 'move') return s + t.amount;
+  if (t.type === 'adjust' && t.envAdj) return s + t.amount;
+  return s - (t.envPart || 0);
+}, 0);
+const cardBalance = () => balance() - envBalance();
+function envTarget() {
+  const E = { total: 0, totalAll: 0, items: [], fut: [], need: () => 0 };
+  if (waiting()) return E;
+  const R = distribute(), s = R.src[0];
+  if (!s) return E;
+  // сегодняшние платежи платятся сразу (с карты или из уже отложенного), переводить под них не нужно
+  const items = s.uses.filter(u => u.type !== 'live'), today = dayKey();
+  const fut = items.filter(u => u.date > today);
+  return { total: fut.reduce((a, u) => a + u.amount, 0), totalAll: items.reduce((a, u) => a + u.amount, 0), items, fut,
+    need: key => fut.filter(u => u.key !== key).reduce((a, u) => a + u.amount, 0) };
+}
+function envCardHtml() {
+  if (!envOn() || waiting()) return '';
+  const T = envTarget(), have = envBalance();
+  if (!T.items.length && Math.abs(have) < 1) return '';
+  const extra = Math.round(have - T.totalAll);
+  const delta = extra >= 1000 ? -extra : Math.max(0, Math.round(T.total - have));
+  const st = delta >= 1000 ? 'need' : delta <= -1000 ? 'extra' : 'ok';
+  return `<div class="card env-card"><div class="card-h"><span class="card-t">📥 Конверты</span><button class="link" data-act="envhelp">как это</button></div>
+    <div class="sum3" style="grid-template-columns:1fr 1fr">
+      <div class="metric"><div class="l">Лежит</div><div class="n" style="color:var(--gold)">${fmt(Math.round(have))}</div></div>
+      <div class="metric"><div class="l">Нужно</div><div class="n">${fmt(Math.round(T.total))}</div></div></div>
+    ${T.items.length ? `<div style="margin-top:8px">${T.items.map(u => `<div class="kv"><span>${useIcon(u.type)} ${esc(u.label)} · ${u.date <= dayKey() ? '<b style="color:var(--accent)">сегодня</b>' : shortDate(u.date)}</span><span>${fmt(Math.round(u.amount))}</span></div>`).join('')}</div>` : ''}
+    ${st === 'ok' ? '<p class="note" style="margin-top:10px;color:var(--good)">✓ В конвертах ровно столько, сколько нужно</p>'
+      : st === 'need' ? `<button class="btn gold-s block" style="margin-top:12px" data-env="${delta}">Перевести в конверты ${fmt(delta)} ₸</button>`
+      : `<button class="btn ghost block" style="margin-top:12px" data-env="${delta}">Лишнее ${fmt(-delta)} ₸ — вернуть на карту</button>`}
+  </div>`;
+}
+function openEnvMove(suggest, intro) {
+  const toEnv = suggest >= 0;
+  openSheet(`<h2>${toEnv ? '📥 Перевод в конверты' : '↩ Вернуть на карту'}</h2>
+    <p class="sub">${intro || (toEnv ? 'Переведите деньги на конвертный счёт (депозит, копилку) — и отметьте здесь.' : 'В конвертах больше, чем нужно под платежи.')}</p>
+    <div class="stabs"><button data-dir="in" class="${toEnv ? 'on' : ''}">В конверты</button><button data-dir="out" class="${!toEnv ? 'on' : ''}">На карту</button></div>
+    <div class="field"><input id="mvAmt" class="huge" inputmode="numeric" data-money value="${fmt(Math.abs(Math.round(suggest)))}"><span class="u">₸</span></div>
+    <button class="btn gold-s block" id="mvOk">Перевёл</button>
+    <button class="btn ghost block" style="margin-top:8px" data-close>Позже</button>`);
+  let dir = toEnv ? 1 : -1;
+  sheetHandler = e => { const b = e.target.closest('[data-dir]'); if (b) { dir = b.dataset.dir === 'in' ? 1 : -1; $$('[data-dir]').forEach(x => x.classList.toggle('on', x === b)); } };
+  const ok = () => {
+    const a = parseMoney($('#mvAmt').value); if (!a || a <= 0) return shake($('#mvAmt'));
+    if (dir < 0 && a > envBalance() + 0.5) { toast(`В конвертах только ${money(envBalance())}`); return shake($('#mvAmt')); }
+    S.tx.push({ id: uid(), ts: new Date().toISOString(), type: 'move', amount: dir * a, date: dayKey(), name: dir > 0 ? 'В конверты' : 'Из конвертов на карту' });
+    afterChange(dir > 0 ? `📥 В конвертах ${money(envBalance())}` : `↩ На карту ${money(a)}`);
+  };
+  $('#mvOk').onclick = ok; onEnter($('#mvAmt'), ok);
+}
+function openEnvHelp() {
+  openSheet(`<h2>📥 Конверты</h2>
+    <p class="note" style="font-size:14px;line-height:1.6">Деньги под будущие платежи (кредиты, аренду, налоги) лучше физически убрать с карты — на депозит, в копилку или на отдельную карту. Чего не видно на карте, то не тратится случайно.<br><br>
+    <b>Нужно</b> — сколько из ваших текущих денег уже закреплено за платежами (по плану распределения).<br>
+    <b>Лежит</b> — сколько вы перевели.<br><br>
+    В день зарплаты приложение подскажет, сколько перевести. При оплате платежа включите «Из конвертов» — сумма спишется с конвертного счёта. Лимит на день считается от общей суммы: перевод между картой и конвертами — не трата.</p>
+    <label class="toggle" style="margin-top:12px"><span>Физические конверты<small>выключите, если деньги остаются на карте</small></span><input type="checkbox" id="envOnT" ${envOn() ? 'checked' : ''}></label>
+    <button class="btn ghost block" data-close>Понятно</button>`);
+  $('#envOnT').onchange = e => { S.profile.envMode = e.target.checked; save(); render(); };
+}
+// после «Пришло» — разложить поступление
+function afterIncomeEnv(amount) {
+  if (!envOn()) return;
+  const T = envTarget(), delta = Math.round(T.total - envBalance());
+  if (delta < 1000) return;
+  setTimeout(() => openEnvMove(delta, `Пришло <b class="mono" style="color:var(--good)">+${fmt(amount)}</b>. Под будущие платежи нужно отложить <b class="mono" style="color:var(--gold)">${fmt(delta)} ₸</b>:<br>${T.fut.map(u => `${useIcon(u.type)} ${esc(u.label)} ${shortDate(u.date)} — ${fmt(Math.round(u.amount))}`).join('<br>')}`), 420);
+}
+
+/* ======================= итог дня ======================= */
+const CLOSE_AT = 21 * 60 + 30;
+let dayCloseReturn = null;
+function closedStreak() {
+  const c = S.meta.closed || {};
+  let k = c[dayKey()] ? dayKey() : addDays(dayKey(), -1), n = 0;
+  while (c[k]) { n++; k = addDays(k, -1); }
+  return n;
+}
+function tomorrowL() {
+  const F = forecast(), floor = S.profile.floor || 0;
+  const todayNet = F.evs.filter(e => e.d === 0).reduce((s, e) => s + e.a, 0);
+  const evs = F.evs.filter(e => e.d >= 1).map(e => ({ ...e, d: e.d - 1 }));
+  return calcL(F.bal + todayNet, evs, floor).L;
+}
+function openDayClose(k) {
+  const F = forecast(), isToday = k === dayKey();
+  const L = (S.meta.limitLog || {})[k] ?? Math.round(Math.max(0, F.L));
+  const spent = spentOn(k), diff = L - spent;
+  const txs = S.tx.filter(t => t.date === k && t.type !== 'move').sort((a, b) => a.ts < b.ts ? -1 : 1);
+  const sunday = fromKey(k).getDay() === 0;
+  const tl = isToday ? Math.max(0, Math.round(tomorrowL())) : null;
+  openSheet(`<h2>🌙 Итог дня</h2><p class="sub">${longDate(k)}, ${wd(k)}${isToday ? '' : ' · вчера'}</p>
+    <div class="dc-head" style="border-color:${diff >= 0 ? 'rgba(62,224,143,.4)' : 'rgba(255,77,106,.45)'}">
+      <div><div class="lim-l">Потрачено</div><div class="lim-v" style="font-size:28px;color:${diff >= 0 ? 'var(--good)' : 'var(--bad)'}">${fmt(spent)} <small style="font-size:14px;color:var(--muted)">из ${fmt(L)}</small></div></div>
+      <div class="sub" style="text-align:right">${diff >= 0 ? `сэкономлено<br><b class="mono" style="color:var(--good)">${fmt(diff)}</b>` : `перерасход<br><b class="mono" style="color:var(--bad)">${fmt(-diff)}</b>`}</div></div>
+    ${tl != null ? `<p class="note" style="margin:8px 2px 0">Лимит на завтра: <b class="mono" style="color:var(--text)">${fmt(tl)} ₸</b>${Math.abs(tl - L) >= 10 ? ` (${tl > L ? '+' : '−'}${fmt(Math.abs(tl - L))})` : ''}</p>` : ''}
+    <div class="card-t" style="margin:16px 0 4px">Записи за день · ${txs.length}</div>
+    ${txs.length ? `<ul class="list dc-list">${txs.map(txRow).join('')}</ul>` : '<p class="sub" style="margin:6px 0">Ничего не внесено. Точно не было трат?</p>'}
+    <p class="note" style="margin:10px 0 12px">Сверьтесь с банковским приложением и чеками: всё ли здесь есть?</p>
+    <button class="btn ghost block" data-dc="add">+ Добавить забытую трату</button>
+    ${sunday ? '<button class="btn ghost block" style="margin-top:8px" data-dc="adj">⚖️ Воскресная сверка баланса с картой</button>' : ''}
+    <button class="btn green block" style="margin-top:8px" data-dc="close">Всё внесено — закрыть день</button>
+    <button class="link" style="display:block;margin:12px auto 0" data-dc="later">напомнить через 30 минут</button>`);
+  sheetHandler = e => {
+    const tx = e.target.closest('[data-tx]'); if (tx) { dayCloseReturn = k; return openTx(tx.dataset.tx); }
+    const b = e.target.closest('[data-dc]'); if (!b) return;
+    const a = b.dataset.dc;
+    if (a === 'add') { dayCloseReturn = k; openTx(null, { date: k }); }
+    if (a === 'adj') { dayCloseReturn = k; openAdjust(); }
+    if (a === 'close') {
+      S.meta.closed = { ...(S.meta.closed || {}), [k]: Date.now() }; dayCloseReturn = null;
+      const n = closedStreak();
+      afterChange(n > 1 ? `🔥 День закрыт · ${n} ${plural(n, 'день', 'дня', 'дней')} подряд` : '✓ День закрыт');
+    }
+    if (a === 'later') { S.meta.snooze = Date.now() + 30 * 60e3; dayCloseReturn = null; save(); closeSheet(); toast('Напомню через 30 минут'); }
+  };
+}
+function returnToDayClose() {
+  if (!dayCloseReturn) return;
+  const k = dayCloseReturn; dayCloseReturn = null;
+  setTimeout(() => openDayClose(k), 380);
+}
+function dayCloseCheck() {
+  if (!S.profile.onboarded || waiting() || !S.profile.startDate) return;
+  if ($('#sheet').classList.contains('open') || $('#onb').classList.contains('open')) return;
+  if ((S.meta.snooze || 0) > Date.now()) return;
+  const now = new Date(), hm = now.getHours() * 60 + now.getMinutes(), today = dayKey(), y = addDays(today, -1);
+  const closed = S.meta.closed || {};
+  if (hm >= CLOSE_AT && !closed[today] && today >= S.profile.startDate) return openDayClose(today);
+  if (hm < CLOSE_AT && y >= S.profile.startDate && !closed[y] && S.meta.askedY !== y) { S.meta.askedY = y; save(); return openDayClose(y); }
+}
+setInterval(dayCloseCheck, 60e3);
+
 /* ======================= события ======================= */
 $('#tabs').addEventListener('click', e => { const t = e.target.closest('[data-tab]'); if (t) go(t.dataset.tab); });
 $('#fab').onclick = () => openTx(null);
@@ -1866,6 +2024,7 @@ document.addEventListener('input', e => {
 });
 $('#app').addEventListener('click', e => {
   const okb = e.target.closest('[data-occ-ok]'); if (okb) return openConfirm(okb.dataset.occOk);
+  const ev = e.target.closest('[data-env]'); if (ev) return openEnvMove(+ev.dataset.env);
   const al = e.target.closest('[data-alloc]'); if (al) return openAlloc(al.dataset.alloc);
   const so = e.target.closest('[data-so]'); if (so && !so.disabled) { sumOff = clamp(sumOff + +so.dataset.so, 0, 1); return renderHome(); }
   const cv = e.target.closest('[data-cv]'); if (cv) { calView = cv.dataset.cv; return renderCal(); }
@@ -1884,6 +2043,8 @@ $('#app').addEventListener('click', e => {
   const a = e.target.closest('[data-act]'); if (!a) return;
   const act = a.dataset.act;
   if (act === 'adjust') openAdjust();
+  if (act === 'envhelp') openEnvHelp();
+  if (act === 'dayclose') openDayClose(dayKey());
   if (act === 'health') openHealth();
   if (act === 'dist') { calView = 'dist'; go('cal'); }
   if (act === 'install') doInstall();
@@ -1922,17 +2083,17 @@ document.addEventListener('visibilitychange', () => {
   try { S = normalize(JSON.parse(localStorage.getItem(KEY))); } catch (e) {}
   ver++; offCache = {};
   if (dayKey() !== lastDay) { lastDay = dayKey(); if (!waiting()) toast('Новый день — лимит пересчитан'); }
-  render(); checkStart();
+  render(); checkStart(); dayCloseCheck();
 });
 window.addEventListener('storage', e => { if (e.key === KEY) { S = normalize(JSON.parse(e.newValue)); ver++; render(); } });
 
 /* ======================= старт ======================= */
 render();
-if (!S.profile.onboarded) openOnb(); else checkStart();
+if (!S.profile.onboarded) openOnb(); else { checkStart(); setTimeout(dayCloseCheck, 600); }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
-window.__fin = { forecast, genOcc, allocation, distribute, get S() { return S; } };   // для отладки
+window.__fin = { forecast, genOcc, allocation, distribute, openConfirm, envBalance, envTarget, get S() { return S; } };   // для отладки
 })();
 </script>
 </body>
