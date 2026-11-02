@@ -364,7 +364,7 @@ function normItem(it) {
     flexible: !!it.flexible, mode: it.mode === 'dec' ? 'dec' : 'fixed', total: it.total ? Math.round(+it.total) : null,
     startMonth: it.startMonth || ymOf(dayKey()), endMonth: it.endMonth || null, prevMonth: !!it.prevMonth,
     overrides: it.overrides && typeof it.overrides === 'object' ? it.overrides : {}, paused: !!it.paused, isDebt: !!it.isDebt,
-    pay: it.pay === 'custom' ? 'custom' : 'plan', asap: !!it.asap && it.kind !== 'income', payAmt: it.payAmt ? Math.round(+it.payAmt) : null, payLeft: it.payLeft ? Math.round(+it.payLeft) : null, payFrom: it.payFrom || null };
+    pay: it.pay === 'custom' ? 'custom' : 'plan', wd: it.kind === 'income' && (it.wd === 1 || it.wd === 2) ? it.wd : 0, asap: !!it.asap && it.kind !== 'income', payAmt: it.payAmt ? Math.round(+it.payAmt) : null, payLeft: it.payLeft ? Math.round(+it.payLeft) : null, payFrom: it.payFrom || null };
 }
 let S = (() => { try { return normalize(JSON.parse(localStorage.getItem(KEY))); } catch (e) { return defaults(); } })();
 let ver = 0;
@@ -412,6 +412,7 @@ function shiftDay(k, rule) {
 function itemAmount(it, ym) {
   if (isCustom(it) && ym >= it.payFrom) return customPlan(it).plan[ym] ?? 0;
   if (it.overrides && it.overrides[ym] != null) return it.overrides[ym];
+  if (it.wd) return wdPay(it.amount, ym, it.wd);
   if (it.mode === 'dec' && it.endMonth && it.total) {
     const n = monthsBetween(it.startMonth, it.endMonth) + 1, i = monthsBetween(it.startMonth, ym);
     if (n <= 1) return it.amount;
@@ -445,6 +446,20 @@ function calcPlan(it) {
 const isCustom = it => it.pay === 'custom' && it.payFrom && it.payAmt > 0;
 const effEnd = it => isCustom(it) ? customPlan(it).last : it.endMonth;
 function decLast(it) { const n = monthsBetween(it.startMonth, it.endMonth) + 1; return n > 1 ? Math.round(2 * it.total / n - it.amount) : it.amount; }
+// Зарплата по рабочим дням: оклад / рабочих дней месяца × рабочих дней в половине (1–15 или 16–конец).
+// Выходные и праздники РК (с переносами) — нерабочие; «свои выходные» на зарплату не влияют.
+const workOff = k => isWeekend(k) || (!!holidayName(k) && holidayName(k) !== 'Свой выходной');
+function wdCount(ym) {
+  let a = 0, b = 0;
+  for (let d = 1; d <= dim(ym); d++) if (!workOff(ymDay(ym, d))) d <= 15 ? a++ : b++;
+  return [a, b];
+}
+function wdPay(total, ym, part) {
+  const [a, b] = wdCount(ym), n = a + b;
+  if (!n) return 0;
+  const rate = total / n;
+  return part === 1 ? Math.round(rate * a) : Math.round(total - Math.round(rate * a));   // вторая часть — остаток, чтобы сумма месяца = оклад
+}
 /* ======================= бюджетный месяц ======================= */
 // Бюджетный месяц начинается с первой «своей» зарплаты месяца (у вас ЗП 15-го) и длится до следующей.
 // Записи с отметкой «относится к прошлому месяцу» (аренда 1-го, кредиты 2-го, фриланс 2-го и 6–10-го)
@@ -544,7 +559,7 @@ function planDebt(it, today, B0, others, floor) {
   for (const d of days) {
     if (paid >= rem - 0.5) break;
     let x = Math.floor(Math.min(rem - paid, C[d] - paid));
-    if (x < Math.min(1000, rem - paid)) continue;          // мелочь не дробим
+    if (x < Math.min(10000, rem - paid)) continue;         // мелочь (< 10 000) не дробим — копится до следующего поступления
     plan.push({ d, a: x }); paid += x;
   }
   // если план не уложился (например, уже есть разрыв) — остаток по минимальному темпу после последней даты
@@ -968,6 +983,7 @@ function ruleText(it) {
   const parts = [];
   if (it.asap) { const l = debtLeft(it), pl = forecast().asapEvs.filter(e => e.o.it === it), end = pl.length ? pl[pl.length - 1].o.date : null;
     return `🚀 как можно быстрее · осталось ${sMoney(l)}${end ? ` · закрытие ${shortDate(end)} ${end.slice(0, 4)}` : l < 1 ? ' · закрыт ✓' : ''} · минимум ${sMoney(it.amount)}/мес`; }
+  if (it.wd) parts.push(`оклад ${sMoney(it.amount)} по раб. дням ${it.wd === 1 ? '1–15' : '16–конец'} · в ${MON_S[+ymOf(effToday()).slice(5) - 1]} ${fmt(itemAmount(it, ymOf(effToday())))}`);
   if (it.flexible) parts.push('в любой день месяца');
   else if (it.dayTo) parts.push(`${it.day}–${it.dayTo} числа`);
   else parts.push(it.day >= 31 ? 'последний день месяца' : `${it.day}-го`);
@@ -991,7 +1007,7 @@ function renderPlan() {
   const mPay = po.filter(o => o.kind === 'payment').reduce((s, o) => s + o.amount, 0);
   const pDays = diffDays(bStart(pb), bEnd(pb)) + 1;
   const row = it => `<li class="tap plan-row" data-item="${it.id}"><span class="emo">${it.kind === 'income' ? '💰' : it.flexible || it.asap ? '🤝' : '📌'}</span>
-    <div class="grow"><div>${esc(it.name)}</div><div class="rule">${ruleText(it)}</div></div><span class="v ${it.kind === 'income' ? 'pos' : ''}">${fmt(it.asap ? debtLeft(it) : isCustom(it) ? it.payAmt : it.amount)}</span></li>`;
+    <div class="grow"><div>${esc(it.name)}</div><div class="rule">${ruleText(it)}</div></div><span class="v ${it.kind === 'income' ? 'pos' : ''}">${fmt(it.asap ? debtLeft(it) : isCustom(it) ? it.payAmt : it.wd ? itemAmount(it, ymOf(effToday())) : it.amount)}</span></li>`;
   let h = installCardHtml() + `<div class="card"><div class="sum3">
       <div class="metric"><div class="l">Доходы/мес</div><div class="n pos">${sMoney(mInc)}</div></div>
       <div class="metric"><div class="l">Платежи/мес</div><div class="n">${sMoney(mPay)}</div></div>
@@ -1018,7 +1034,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.9.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.10.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1746,8 +1762,11 @@ function openItem(id, kindNew) {
     const inc = d.kind === 'income';
     openSheet(`<h2>${old ? 'Правило' : inc ? 'Новый доход' : 'Новый платёж'}</h2><p class="sub">${old ? 'Изменения применятся ко всем месяцам, кроме вручную изменённых' : 'Повторяется каждый месяц'}</p>
       <div class="field"><label>Название</label><input id="itName" class="txt" maxlength="40" placeholder="${inc ? 'Зарплата' : 'Аренда'}" value="${esc(d.name)}"></div>
+      ${inc ? `<div class="stabs">${[[0, 'Фиксированная сумма'], [1, 'Оклад: за 1–15'], [2, 'Оклад: за 16–конец']].map(([k, l]) => `<button data-wd="${k}" class="${(d.wd || 0) === k ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
       ${!inc ? `<div class="stabs">${[['fixed', 'Фиксированная сумма'], ['dec', 'Убывающая']].map(([k, l]) => `<button data-md="${k}" class="${d.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
-      <div class="field"><label>${d.mode === 'dec' ? 'Платёж в первый месяц' : !inc && dateMode === 'flex' && d.asap ? 'Минимум в месяц (темп)' : 'Сумма'}</label><input id="itAmt" inputmode="numeric" data-money value="${d.amount ? fmt(d.amount) : ''}" placeholder="0"><span class="u">₸</span></div>
+      <div class="field"><label>${inc && d.wd ? 'Оклад в месяц (полный)' : d.mode === 'dec' ? 'Платёж в первый месяц' : !inc && dateMode === 'flex' && d.asap ? 'Минимум в месяц (темп)' : 'Сумма'}</label><input id="itAmt" inputmode="numeric" data-money value="${d.amount ? fmt(d.amount) : ''}" placeholder="0"><span class="u">₸</span></div>
+      ${inc && d.wd ? `<div class="calc" style="margin:-4px 0 14px">${[0, 1, 2, 3].map(i => { const ym = ymAdd(d.startMonth > ymOf(dayKey()) ? d.startMonth : ymOf(dayKey()), i), [a, b] = wdCount(ym); return `<div class="kv"><span>${ymNameShort(ym)} · ${d.wd === 1 ? a : b} из ${a + b} раб. дн</span><span>${fmt(wdPay(d.amount || 0, ym, d.wd))}</span></div>`; }).join('')}
+        <p class="note" style="margin-top:6px">Оклад ÷ рабочие дни месяца × рабочие дни ${d.wd === 1 ? 'с 1 по 15 число' : 'с 16 числа до конца месяца'}. Праздники РК и переносы — нерабочие.</p></div>` : ''}
       ${d.mode === 'dec' ? `<div class="field"><label>Всего выплатить за весь срок</label><input id="itTotal" inputmode="numeric" data-money value="${d.total ? fmt(d.total) : ''}" placeholder="2 000 000"><span class="u">₸</span>
         <div class="hint">Платёж будет равномерно снижаться. Точную сумму любого месяца можно поправить в календаре.</div></div>` : ''}
       ${!inc && dateMode !== 'flex' && (d.isDebt || d.mode === 'dec' || Object.keys(d.overrides || {}).length > 1) ? payoffHtml() : ''}
@@ -1840,8 +1859,9 @@ function openItem(id, kindNew) {
   };
   handler = e => {
     if (e.target.id === 'itAsap') { collect(); if (d.asap) d.isDebt = true; draw(); return; }
-    const b = e.target.closest('[data-md],[data-dm],[data-sh],[data-pm]'); if (b) {
+    const b = e.target.closest('[data-md],[data-dm],[data-sh],[data-pm],[data-wd]'); if (b) {
       collect();
+      if (b.dataset.wd != null) d.wd = +b.dataset.wd;
       if (b.dataset.pm) { d.pay = b.dataset.pm; if (d.pay === 'custom' && !d.payFrom) { const df = payDefaults(); d.payFrom = df.from; d.payLeft = d.payLeft || df.left; } }
       if (b.dataset.md) d.mode = b.dataset.md;
       if (b.dataset.dm) dateMode = b.dataset.dm;
@@ -1874,6 +1894,7 @@ function openItem(id, kindNew) {
         if (!d.payFrom) return shake($('#pfFrom'));
       }
       d.name = d.name.trim();
+      if (d.kind !== 'income') d.wd = 0;
       const clean = normItem(d);
       if (old) Object.assign(old, clean); else S.schedule.push(clean);
       afterChange(old ? 'Правило сохранено, лимит пересчитан' : `«${clean.name}» добавлено`);
