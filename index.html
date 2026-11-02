@@ -662,16 +662,18 @@ function forecastCalc(today) {
     why[o.key] = first.c < pick.c ? { alt: first.c, room: first.room, worst: first.worst } : null;
   }
   // досрочные долги
+  // цели с датой: к дате на карте должна быть сумма (минус уже переведённое на отдельный счёт).
+  // Учитываются ДО плана досрочных долгов: расход на цель берётся понемногу и из лимита, и из темпа досрочного погашения.
+  const goalEvs = S.goals.filter(g => !g.done && g.date && gFromCard(g) > 0)
+    .map(g => ({ d: Math.max(0, diffDays(today, g.date)), a: -gFromCard(g), o: { key: 'goal|' + g.id, name: g.name, goal: g, kind: 'goal', date: g.date } }));
   const asapEvs = [];
-  for (const it of S.schedule.filter(i => i.asap && !i.paused)) asapEvs.push(...planDebt(it, today, B0, fixed.concat(flexEvs(), asapEvs), floor));
+  for (const it of S.schedule.filter(i => i.asap && !i.paused)) asapEvs.push(...planDebt(it, today, B0, fixed.concat(flexEvs(), goalEvs, asapEvs), floor));
   DP = { ver, today, list: asapEvs.map(e => e.o) };
   for (const e of asapEvs) { fixed.push(e); occ.push(e.o); pending.push(e.o); }
   occ.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.kind === b.kind ? 0 : a.kind === 'income' ? -1 : 1);
   const base = fixed.concat(flexEvs());
   const r0 = calcL(B0, base, floor);                        // лимит без целей
   // цели с датой: к дате на карте должна быть сумма (минус уже переведённое на отдельный счёт)
-  const goalEvs = S.goals.filter(g => !g.done && g.date && gFromCard(g) > 0)
-    .map(g => ({ d: Math.max(0, diffDays(today, g.date)), a: -gFromCard(g), o: { key: 'goal|' + g.id, name: g.name, goal: g, kind: 'goal', date: g.date } }));
   const evs = base.concat(goalEvs);
   const r = calcL(B0, evs, floor);
   if (S.profile.onboarded && S.profile.startBalance != null) {   // лимит дня — для статистики «уложился ли»
@@ -811,6 +813,8 @@ function renderHome() {
       }).join('')}</ul></div>`;
   }
 
+  const waitComp = S.goals.filter(g => g.comp && g.done && !gCompTx(g));
+  if (waitComp.length) h += `<div class="card"><div class="card-t" style="margin-bottom:8px;color:var(--good)">💌 Ждём компенсацию</div><ul class="list">${waitComp.map(g => `<li><div class="grow"><div>${esc(g.name)}</div><div class="d">потрачено ${longDate(g.done)} · вернут — отметьте</div></div><button class="btn sm green" data-g="comp" data-id="${g.id}">Компенсировано</button></li>`).join('')}</ul></div>`;
   h += warningsHtml(F);
   h += debtCardHtml(F);
   // гибкие платежи
@@ -1046,7 +1050,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.12.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.13.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1057,6 +1061,23 @@ const gSaved = g => (g.ops || []).reduce((s, o) => s + o.amount, 0);
 const gMoved = g => (g.ops || []).filter(o => o.moved).reduce((s, o) => s + o.amount, 0);
 const gFromCard = g => Math.max(0, g.amount - gMoved(g));     // сколько к дате должно быть на карте
 const activeGoals = () => S.goals.filter(g => !g.done);
+// компенсация: расход, который потом вернут (коллеги скинутся и т.п.). Пока не вернули — не учитывается как доход.
+const gCompTx = g => g.compTx ? S.tx.find(t => t.id === g.compTx) : null;
+function toggleComp(id) {
+  const g = findGoal(id); if (!g) return;
+  const t = gCompTx(g);
+  if (t) { if (!confirm(`Снять отметку «Компенсировано»? Доход ${fmt(t.amount)} ₸ удалится из журнала.`)) return; S.tx = S.tx.filter(x => x.id !== t.id); delete g.compTx; return afterChange('Компенсация снята'); }
+  openSheet(`<h2>💌 Компенсировано</h2><p class="sub">${esc(g.name)} — сколько вернули? Сумма придёт доходом и перераспределится: лимит и досрочные платежи пересчитаются.</p>
+    <div class="field"><input id="gcAmt" class="huge" inputmode="numeric" data-money value="${fmt(g.done ? (S.tx.filter(t => t.goalId === g.id && t.type === 'payment').reduce((a, t) => a + t.amount, 0) || g.amount) : g.amount)}"><span class="u">₸</span></div>
+    <button class="btn green block" id="gcOk">Готово</button>`);
+  const ok = () => {
+    const a = parseMoney($('#gcAmt').value); if (!a || a <= 0) return shake($('#gcAmt'));
+    const tx = { id: uid(), ts: new Date().toISOString(), type: 'income', amount: a, date: dayKey(), name: '💌 Компенсация: ' + g.name, compGoal: g.id };
+    S.tx.push(tx); g.compTx = tx.id;
+    afterChange(`+${fmt(a)} ₸ компенсации — лимит пересчитан`);
+  };
+  $('#gcOk').onclick = ok; onEnter($('#gcAmt'), ok);
+}
 const minDaily = () => S.profile.minDaily || Math.max(1000, Math.round(Math.max(0, forecast().L0) * 0.85 / 100) * 100);
 
 // самая ранняя дата, когда можно потратить amount с карты, не опуская лимит ниже минимума на жизнь
@@ -1082,16 +1103,25 @@ function goalImpact(amount, date, excludeKey) {
 }
 const monthsTo = date => Math.max(1, diffDays(dayKey(), date) / 30.44);
 
-function goalCard(g) {
+// сценарий «без целей с датой»: полный пересчёт (с досрочными долгами), чтобы показать честную цену целей
+let NG = null;
+function noGoalsForecast() {
+  if (NG && NG.ver === ver) return NG.F;
+  const keep = S.goals, v0 = ver;
+  S.goals = keep.filter(g => g.done || !g.date); ver = -7; FC = null;
+  let F0; try { F0 = forecast(); } finally { S.goals = keep; ver = v0; FC = null; }
+  NG = { ver, F: F0 }; return F0;
+}
+function goalCard(g, ctx) {
   const saved = gSaved(g), p = g.amount ? clamp(saved / g.amount) : 0, F = forecast();
   const fromCard = gFromCard(g);
   let plan = '';
   if (g.date) {
-    const imp = goalImpact(fromCard, g.date, 'goal|' + g.id);
     const late = g.date < F.today;
+    const share = ctx && ctx.sum > 0 ? ctx.dL * fromCard / ctx.sum : 0;
     plan = `<div class="plan">${late ? `<b style="color:var(--bad)">Срок прошёл ${longDate(g.date)}</b>` : `К <b>${longDate(g.date)}</b> · ${relDay(g.date)}`}
       ${!late && g.amount > saved ? `<br>Откладывать ≈ <b>${fmt(Math.round((g.amount - saved) / monthsTo(g.date)))}</b> ₸/мес` : ''}
-      <br>Цена для лимита: <b>−${fmt(Math.round(imp.delta))}</b> ₸/день${imp.L1 < minDaily() ? ` <span style="color:var(--warn)">· ниже минимума на жизнь (${fmt(minDaily())})</span>` : ''}</div>`;
+      ${share >= 1 ? `<br>Доля в цене для лимита: ≈ <b>−${fmt(Math.round(share))}</b> ₸/день` : ''}</div>`;
   } else {
     const es = earliestSafe(fromCard, 'goal|' + g.id);
     plan = `<div class="plan">${es ? `Без ущерба можно к <b>${longDate(es.date)}</b> (${relDay(es.date)}) — лимит останется ≥ ${fmt(minDaily())} ₸/день` : 'В ближайший год без ущерба не получится — уменьшите сумму или минимум на жизнь'}
@@ -1104,9 +1134,10 @@ function goalCard(g) {
     <div class="pbar"><i style="width:${p * 100}%"></i></div>
     <div class="sub" style="font-size:12px">${Math.round(p * 100)}%${gMoved(g) ? ` · на отдельном счёте ${fmt(gMoved(g))}` : ''}</div>
     ${plan}
+    ${g.comp ? `<p class="note" style="margin-top:8px">💌 Потом компенсируют — после возврата отметьте «Компенсировано», деньги перераспределятся.</p>` : ''}
     <div class="row" style="margin-top:12px">
       <button class="btn sm gold grow" data-g="save" data-id="${g.id}">Отложить</button>
-      ${g.cushion ? '' : `<button class="btn sm green grow" data-g="buy" data-id="${g.id}">Куплено</button>`}
+      ${g.cushion ? '' : `<button class="btn sm green grow" data-g="buy" data-id="${g.id}">${g.comp ? 'Потрачено' : 'Куплено'}</button>`}
       <button class="btn sm ghost" data-g="edit" data-id="${g.id}" aria-label="Изменить">⋯</button>
     </div></div>`;
 }
@@ -1120,10 +1151,23 @@ function renderGoals() {
       <div class="metric"><div class="l">Минимум</div><div class="n tap" data-g="min" style="cursor:pointer">${fmt(minDaily())} ✎</div></div></div>
     <p class="note" style="margin-top:10px">Цели с датой уже заложены в дневной лимит: деньги на них копятся сами. «Минимум» — ниже этого лимита цели не опускают («без ущерба»).</p></div>
     <div class="sec-h"><h2>Цели и покупки</h2><button class="add-btn" data-g="new">+ Цель</button></div>`;
-  h += gs.length ? gs.map(goalCard).join('') : `<div class="card"><p class="sub">Налоги, техника, отпуск, подушка безопасности. Укажите сумму — приложение подскажет самую раннюю дату, когда это возможно без ущерба для жизни.</p>
+  let ctx = null;
+  const dated = gs.filter(g => g.date && gFromCard(g) > 0);
+  if (dated.length) {
+    const F0 = noGoalsForecast(), sum = dated.reduce((a, g) => a + gFromCard(g), 0);
+    ctx = { dL: Math.max(0, F0.L - F.L), sum };
+    const endOf = FF => { const out = []; for (const it of S.schedule.filter(i => i.asap && !i.paused)) { const pl = FF.asapEvs.filter(e => e.o.it.id === it.id); if (pl.length) out.push({ it, end: pl[pl.length - 1].o.date }); } return out; };
+    const e1 = endOf(F), e0 = endOf(F0);
+    h += `<div class="card"><div class="card-t" style="margin-bottom:8px">Во что обходятся цели с датой</div>
+      <div class="kv"><span>Всего</span><span>${fmt(sum)} ₸</span></div>
+      <div class="kv"><span>Дневной лимит</span><span>${fmt(Math.round(F0.L))} → <b style="color:var(--warn)">${fmt(Math.max(0, Math.round(F.L)))}</b> (−${fmt(Math.round(ctx.dL))})</span></div>
+      ${e1.map(x => { const b = e0.find(y => y.it.id === x.it.id); return b && b.end !== x.end ? `<div class="kv"><span>🤝 ${esc(x.it.name)} закроется</span><span>${shortDate(x.end)} ${x.end.slice(0, 4)} <small class="sub">вместо ${shortDate(b.end)}</small></span></div>` : ''; }).join('')}
+      <p class="note" style="margin-top:6px">Деньги на цели берутся понемногу из всего, кроме обязательных платежей: из дневного лимита и из темпа досрочного погашения. Налоги и кредиты — по графику.</p></div>`;
+  }
+  h += gs.length ? gs.map(g => goalCard(g, ctx)).join('') : `<div class="card"><p class="sub">Налоги, техника, отпуск, подушка безопасности. Укажите сумму — приложение подскажет самую раннюю дату, когда это возможно без ущерба для жизни.</p>
     <button class="btn block" style="margin-top:12px" data-g="new">Добавить цель</button></div>`;
   if (done.length) h += `<details class="closed"><summary class="sub" style="padding:6px 4px">Выполнено (${done.length}) ▾</summary>
-    <div class="card" style="padding:4px 14px"><ul class="list">${done.map(g => `<li class="tap" data-g="edit" data-id="${g.id}"><span class="emo">✅</span><div class="grow"><div>${esc(g.name)}</div><div class="d">${longDate(g.done)}</div></div><span class="v">${fmt(g.amount)}</span></li>`).join('')}</ul></div></details>`;
+    <div class="card" style="padding:4px 14px"><ul class="list">${done.map(g => `<li class="tap" data-g="edit" data-id="${g.id}"><span class="emo">✅</span><div class="grow"><div>${esc(g.name)}</div><div class="d">${longDate(g.done)}${g.comp ? (gCompTx(g) ? ` · 💌 компенсировано ${fmt(gCompTx(g).amount)}` : ' · ждём компенсацию') : ''}</div></div>${g.comp && !gCompTx(g) ? `<button class="btn sm green" data-g="comp" data-id="${g.id}">Компенсировано</button>` : `<span class="v">${fmt(g.amount)}</span>`}</li>`).join('')}</ul></div></details>`;
   $('#goalsBox').innerHTML = h;
 }
 function onGoalAct(e) {
@@ -1134,6 +1178,7 @@ function onGoalAct(e) {
   if (a === 'save') openGoalSave(id);
   if (a === 'buy') openGoalBuy(id);
   if (a === 'min') openMinDaily();
+  if (a === 'comp') toggleComp(id);
   if (a === 'plan') { const g = findGoal(id); g.date = b.dataset.date; afterChange(`«${g.name}» запланирована на ${longDate(g.date)} — лимит пересчитан`); }
 }
 function openGoalForm(id) {
@@ -1144,6 +1189,8 @@ function openGoalForm(id) {
     <div class="field"><label>Сумма</label><input id="gfAmt" inputmode="numeric" data-money placeholder="300 000" value="${d.amount ? fmt(d.amount) : ''}"><span class="u">₸</span></div>
     <div class="field"><label>К какой дате (необязательно)</label><input id="gfDate" type="date" min="${dayKey()}" value="${d.date || ''}"></div>
     <label class="toggle"><span>Подушка безопасности<small>копится и не тратится — учитывается в индексе здоровья</small></span><input type="checkbox" id="gfCush" ${d.cushion ? 'checked' : ''}></label>
+    <label class="toggle"><span>💌 Потом компенсируют<small>например, коллеги скинутся. В расчёте — как расход; когда вернут, отметите «Компенсировано»</small></span><input type="checkbox" id="gfComp" ${d.comp ? 'checked' : ''}></label>
+    ${g && g.comp ? `<button class="btn ghost block" style="margin-bottom:12px" data-g="comp" data-id="${g.id}">${gCompTx(g) ? `✓ Компенсировано ${fmt(gCompTx(g).amount)} ₸ — снять` : '💌 Отметить «Компенсировано»'}</button>` : ''}
     <div class="calc" id="gfCalc"></div>
     <button class="btn block" id="gfOk">${g ? 'Сохранить' : 'Добавить'}</button>
     ${g ? `<button class="btn ghost block" style="margin-top:8px" id="gfHist">История (${(g.ops || []).length})</button><button class="btn danger block" style="margin-top:8px" id="gfDel">Удалить цель</button>` : ''}`);
@@ -1163,13 +1210,14 @@ function openGoalForm(id) {
     $('#gfCalc').innerHTML = h;
   };
   sheetInput = e => { if (['gfAmt', 'gfDate'].includes(e.target.id)) calc(); };
+  sheetHandler = e => { const b = e.target.closest('[data-g="comp"]'); if (b) toggleComp(b.dataset.id); };
   $('#gfDate').onchange = calc; calc();
   $('#gfOk').onclick = () => {
     const name = $('#gfName').value.trim(), amount = parseMoney($('#gfAmt').value);
     if (!name) return shake($('#gfName'));
     if (!amount || amount <= 0) return shake($('#gfAmt'));
     const rec = g || { id: uid(), ops: [], done: null, createdAt: new Date().toISOString() };
-    Object.assign(rec, { name, amount, date: $('#gfDate').value || null, cushion: $('#gfCush').checked });
+    Object.assign(rec, { name, amount, date: $('#gfDate').value || null, cushion: $('#gfCush').checked, comp: $('#gfComp').checked });
     if (!g) S.goals.push(rec);
     afterChange(g ? 'Сохранено, лимит пересчитан' : `Цель «${name}» добавлена`);
   };
@@ -1515,7 +1563,7 @@ function payoutData(it) {
     const R = distribute(); let need = o.amount;
     for (let b = cb; b < o.bym && need > 0.5; b = ymAdd(b, 1)) {
       const res = R.srcYear.filter(s => (s.start ? cb : s.bym) === b).flatMap(s => s.uses).filter(u => u.ubym && u.ubym >= o.bym).reduce((a, u) => a + u.amount, 0);
-      const x = Math.min(need, res); if (x > 0.5) { rows.push({ ym: b, amount: x }); need -= x; }
+      const x = Math.min(need, res); if (x >= 500) { rows.push({ ym: b, amount: x }); need -= x; }
     }
     if (need > 0.5) rows.push({ ym: o.bym, amount: need, own: true });
     let left = o.amount; for (const r of rows) { left -= r.amount; r.left = Math.max(0, left); }
@@ -2086,7 +2134,7 @@ function importData(file) {
         let ng = 0;
         for (const g of raw.goals || []) {
           if (!g.name || !(+g.amount > 0) || S.goals.some(x => x.name === g.name && !x.done)) continue;
-          S.goals.push({ id: uid(), name: g.name, amount: Math.round(+g.amount), date: g.date || null, cushion: !!g.cushion, ops: [], done: null, createdAt: new Date().toISOString() }); ng++;
+          S.goals.push({ id: uid(), name: g.name, amount: Math.round(+g.amount), date: g.date || null, cushion: !!g.cushion, comp: !!g.comp, ops: [], done: null, createdAt: new Date().toISOString() }); ng++;
         }
         save(); closeSheet(); render(); if ($('#onb').classList.contains('open')) renderOnb();
         toast(`Загружено правил: ${S.schedule.length}${ng ? `, целей: ${ng}` : ''}`);
