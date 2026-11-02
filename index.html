@@ -71,6 +71,17 @@ input,select{font:inherit;color:inherit}
 .metric .n{font-family:var(--mono);font-size:18px;font-weight:700;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .metric .n small{font-size:12px;color:var(--muted);font-weight:500}
 .metric.tap{cursor:pointer}
+.prow{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.2fr;gap:6px;padding:8px 2px;border-bottom:1px dashed var(--line);font-size:13px;align-items:center}
+.prow span:not(:first-child){text-align:right}
+.prow.head{font-size:10.5px;color:var(--muted);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow.done{opacity:.55}
+.prow.cur{background:rgba(34,227,255,.06);border-radius:8px}
+.prow .mut{color:var(--muted)} .prow .dn{color:var(--good)} .prow .up{color:var(--warn)}
+details.dmonth>summary{list-style:none;cursor:pointer}
+details.dmonth>summary::-webkit-details-marker{display:none}
+details.dmonth>summary .month-h h2::after{content:' ▾';color:var(--muted);font-size:.8em}
+details.dmonth[open]>summary .month-h h2::after{content:' ▴'}
 .warn{display:flex;gap:10px;padding:10px 0;border-bottom:1px dashed var(--line);font-size:13px;line-height:1.45}
 .warn:last-child{border-bottom:0}
 .warn .ic{font-size:18px;line-height:1.2}
@@ -931,6 +942,7 @@ function renderCal() {
   const F = forecast(), today = F.today, tYm = ymOf(today);
   if (!S.schedule.length) { $('#calBox').innerHTML = '<p class="empty">Расписание пустое. Добавьте доходы и платежи во вкладке «План».</p>'; return; }
   if (calView === 'dist') return renderDist();
+  if (calView === 'pay') return renderPayouts();
   let h = calTabs() + '<p class="sub" style="margin:0 4px 4px">Тап по строке: подтвердить, пропустить, изменить сумму или дату этого месяца.</p>';
   const cb = curBym();
   for (let i = 0; i < 5; i++) {
@@ -1034,7 +1046,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.10.2</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.12.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1391,7 +1403,7 @@ function distribute() {
       if (use.key) (payBy[use.key] = payBy[use.key] || []).push({ src: src[i], amount: t });
       u[u.length - 1].ubym = bym;
     }
-    if (left > 0.5) short.push({ date: addDays(today, d), label: use.label, amount: left });
+    if (left > 50) short.push({ date: addDays(today, d), label: use.label, amount: left });
   };
   for (let d = 0; d <= Dfull; d++) {
     const k = addDays(today, d);
@@ -1403,11 +1415,12 @@ function distribute() {
   }
   src.forEach((s, i) => { s.free = rem[i]; });
   const lastBym = ymAdd(curBym(), 1);
-  DS = { ver: F.ver, today, L, endDate, src: src.filter(s => s.start || s.bym <= lastBym), payBy, short: short.filter(x => x.date <= endDate) };
+  DS = { ver: F.ver, today, L, endDate, src: src.filter(s => s.start || s.bym <= lastBym), srcYear: src.filter(s => s.start || s.bym <= ymAdd(curBym(), 11)), payBy, short: short.filter(x => x.date <= endDate), shortYear: short.filter(x => x.date <= bEnd(ymAdd(curBym(), 11))) };
   return DS;
 }
 const useIcon = t => ({ live: '🍽', pay: '📌', flex: '🤝', goal: '🎯' }[t] || '•');
 function useLine(u, today) {
+  if (u.type === 'carry') return `<div class="kv"><span>➡️ Остаток — в бюджет ${MON_G2(u.ubym)} <small class="sub">на жизнь</small></span><span>${fmt(Math.round(u.amount))}</span></div>`;
   if (u.type === 'live') {
     const label = u.from === u.to ? `Жизнь ${shortDate(u.from)}` : `Жизнь ${shortDate(u.from)} – ${shortDate(u.to)}`;
     return `<div class="kv"><span>🍽 ${label} <small class="sub">${u.days} дн${u.from === today ? ' · с сегодня' : ''}</small></span><span>${fmt(Math.round(u.amount))}</span></div>`;
@@ -1417,9 +1430,14 @@ function useLine(u, today) {
   return `<div class="kv"><span>${useIcon(u.type)} ${esc(u.label)} · ${shortDate(u.date)}${part ? ` <small class="sub">часть из ${fmt(u.total)}</small>` : ''}${env ? ' <small class="env">конверт</small>' : ''}</span><span>${fmt(Math.round(u.amount))}</span></div>`;
 }
 // для показа: дни жизни, идущие подряд, склеиваются в одну строку, даже если между ними стоит платёж
-function mergeLive(uses) {
-  const out = []; let last = null;
+// жизнь из чужого (следующего) бюджетного месяца — это остаток, переходящий дальше: одной строкой «➡️ в бюджет …»
+function mergeLive(uses, sb) {
+  const out = []; let last = null, carry = null;
   for (const u of uses) {
+    if (u.type === 'live' && sb && u.ubym && u.ubym > sb) {
+      if (!carry) { carry = { type: 'carry', ubym: u.ubym, amount: 0 }; out.push(carry); }
+      carry.amount += u.amount; continue;
+    }
     if (u.type === 'live' && last && addDays(last.to, 1) === u.from) { last.to = u.to; last.days += u.days; last.amount += u.amount; continue; }
     const c = { ...u }; out.push(c); if (c.type === 'live') last = c;
   }
@@ -1431,7 +1449,7 @@ function srcCard(s, today, compact) {
   return `<div class="card dist">
     <div class="card-h"><span style="font-weight:600">${s.start ? '💳' : '💰'} ${esc(s.name)}</span><span class="mono pos" style="font-weight:700">${s.start ? '' : '+'}${fmt(Math.round(s.amount))}</span></div>
     <div class="sub" style="margin:-6px 0 8px">${s.start ? `на начало дня${S.profile.floor ? ', без неприкосновенного остатка' : ''}` : `${longDate(s.date)}, ${wd(s.date)}`}</div>
-    ${s.uses.length ? mergeLive(s.uses).map(u => useLine(u, today)).join('') : ''}
+    ${s.uses.length ? mergeLive(s.uses, s.start ? null : s.bym).filter(u => u.amount >= 0.5).map(u => useLine(u, today)).join('') : ''}
     ${s.free > 0.5 ? `<div class="kv"><span>➡️ Свободно — в следующие месяцы и цели</span><span style="color:var(--gold)">${fmt(Math.round(s.free))}</span></div>` : ''}
     ${!compact ? `<div class="dist-sum"><span>🍽 ${fmt(Math.round(live))}</span><span>📌 ${fmt(Math.round(pays.reduce((a, u) => a + u.amount, 0)))}</span>${s.free > 0.5 ? `<span>➡️ ${fmt(Math.round(s.free))}</span>` : ''}</div>` : ''}
   </div>`;
@@ -1441,20 +1459,104 @@ function renderDist() {
   let h = (waiting() ? `<div class="banner yel"><span class="ic">📅</span><span>Учёт начнётся ${longDate(S.profile.startDate)}. Пока план посчитан от этого дня с нулевым остатком — реальный остаток вы введёте в день старта, и всё пересчитается.</span></div>` : '') + `<div class="card"><div class="card-t" style="margin-bottom:8px">Как работает</div>
     <p class="note">Дневной лимит <b class="mono" style="color:var(--text)">${fmt(Math.round(R.L))} ₸</b> рассчитан так, чтобы хватило на все платежи года. Каждая нужда — день жизни, платёж, отцу, цель — оплачивается самыми ранними ещё не распределёнными деньгами. «Конверт» — деньги, которые приходят раньше платежа и до его даты не трогаются.</p>
     <p class="note" style="margin-top:6px">Деньги месяца сначала закрывают нужды своего месяца, излишек остаётся конвертом под будущие крупные платежи. Показаны доходы до ${longDate(R.endDate)}, пересчёт — после каждой траты и отметки.</p></div>`;
-  if (R.short.length) h += `<div class="banner red"><span class="ic">⚠️</span><span>Не хватает: ${R.short.slice(0, 3).map(x => `${esc(x.label)} ${shortDate(x.date)} — <b>${money(x.amount)}</b>`).join('; ')}</span></div>`;
-  let curB = null;
-  for (const s of R.src) {
+  const sh = distYear ? R.shortYear : R.short;
+  if (sh.length) h += `<div class="banner red"><span class="ic">⚠️</span><span>Не хватает: ${sh.slice(0, 3).map(x => `${esc(x.label)} ${shortDate(x.date)} — <b>${money(x.amount)}</b>`).join('; ')}</span></div>`;
+  // группы по бюджетным месяцам; в режиме «год» месяцы с третьего — свёрнуты, в заголовке итоги
+  const groups = [];
+  for (const s of distYear ? R.srcYear : R.src) {
     if (s.start && !s.amount && !s.uses.length) continue;
     const b = s.start ? curBym() : s.bym;
-    if (b !== curB) { curB = b; h += `<div class="month-h"><h2>Бюджет ${MON_G2(b)}</h2><span class="sub">${bRange(b)}</span></div>`; }
-    h += srcCard(s, today);
+    if (!groups.length || groups[groups.length - 1].b !== b) groups.push({ b, src: [] });
+    groups[groups.length - 1].src.push(s);
   }
+  groups.forEach((g, i) => {
+    const uses = g.src.flatMap(s => s.uses);
+    const inc = g.src.filter(s => !s.start).reduce((a, s) => a + s.amount, 0);
+    const pay = uses.filter(u => u.type !== 'live').reduce((a, u) => a + u.amount, 0);
+    const live = uses.filter(u => u.type === 'live' && (!u.ubym || u.ubym === g.b)).reduce((a, u) => a + u.amount, 0);
+    const tax = uses.filter(u => u.type !== 'live' && u.date > bEnd(g.b)).reduce((a, u) => a + u.amount, 0);
+    const free = g.src.reduce((a, s) => a + (s.free || 0), 0);
+    const K = v => { v = Math.round(v); return v >= 1e4 ? fmt(Math.round(v / 1000)) + 'K' : fmt(v); };
+    const head = `<div class="month-h"><h2>Бюджет ${MON_G2(g.b)}</h2><span class="sub">${bRange(g.b)}</span></div>`;
+    const tot = `<div class="dist-sum" style="margin:-4px 4px 10px;justify-content:flex-start;flex-wrap:wrap"><span class="pos">+${K(inc)}</span><span>📌 ${K(pay - tax)}</span><span>🍽 ${K(live)}</span>${tax > 500 ? `<span style="color:var(--gold)">🔒 ${K(tax)} на будущее</span>` : ''}${free > 500 ? `<span style="color:var(--good)">➡️ ${K(free)} свободно</span>` : ''}</div>`;
+    const cards = g.src.map(s => srcCard(s, today)).join('');
+    if (distYear && i >= 2) h += `<details class="dmonth"><summary>${head}${tot}</summary>${cards}</details>`;
+    else h += head + (distYear ? tot : '') + cards;
+  });
+  if (distYear) { const fb = groups.find(g => g.src.reduce((a, s) => a + (s.free || 0), 0) > 500); if (fb) h += `<p class="note" style="margin:4px 4px 10px">➡️ «Свободно» — деньги сверх всех платежей и жизни по сегодняшнему лимиту. Начиная с ${MON_G2(fb.b)} они появляются, потому что самые тяжёлые месяцы позади: когда до них дойдёт, лимит пересчитается и вырастет.</p>`; }
+  h += `<button class="btn ghost block" style="margin:6px 0 14px" data-act="distyear">${distYear ? 'Свернуть до 2 месяцев' : '📅 Показать распределение на год'}</button>`;
   $('#calBox').innerHTML = calTabs() + h;
 }
 function calTabs() {
-  return `<div class="stabs" id="calTabs"><button data-cv="dist" class="${calView === 'dist' ? 'on' : ''}">Распределение</button><button data-cv="events" class="${calView === 'events' ? 'on' : ''}">События</button></div>`;
+  return `<div class="stabs" id="calTabs"><button data-cv="dist" class="${calView === 'dist' ? 'on' : ''}">Распределение</button><button data-cv="events" class="${calView === 'events' ? 'on' : ''}">События</button><button data-cv="pay" class="${calView === 'pay' ? 'on' : ''}">Выплаты</button></div>`;
 }
-let calView = 'dist';
+let calView = 'dist', distYear = false;
+
+/* ---------- календари выплат: долги с концом, досрочные долги, крупные разовые платежи ---------- */
+function payoutItems() {
+  return S.schedule.filter(it => it.kind === 'payment' && !it.paused &&
+    (it.asap || (it.isDebt && !it.flexible && effEnd(it)) || (it.endMonth && it.endMonth === it.startMonth && it.amount >= 100000)));
+}
+function payoutData(it) {
+  const cb = curBym(), txAmt = o => { if (o.status === 'done') { const t = S.tx.find(t => t.id === o.txId); if (t) return t.amount; } return o.amount; };
+  const rows = [];
+  if (it.asap) {
+    const occ = genOcc(ymAdd(cb, -12), ymAdd(cb, 24), true).filter(o => o.it === it && o.status !== 'skip');
+    for (const o of occ) { let r = rows.find(x => x.ym === o.bym); if (!r) rows.push(r = { ym: o.bym, amount: 0, done: 0, n: 0 }); r.amount += txAmt(o); r.n++; if (o.status === 'done') r.done++; }
+    let left = it.payLeft || 0; for (const r of rows) { left -= r.amount; r.left = Math.max(0, left); r.allDone = r.done === r.n; }
+    return { kind: 'debt', rows, total: it.payLeft || 0, end: rows.length ? rows[rows.length - 1].ym : null, unit: 'бюджет' };
+  }
+  if (it.endMonth && it.endMonth === it.startMonth) {     // разовый крупный платёж: сколько откладывается в каждом бюджетном месяце
+    const o = genOcc(it.startMonth, it.startMonth, true).find(x => x.it === it);
+    if (!o) return null;
+    if (o.status === 'done') return { kind: 'once', rows: [{ ym: o.bym, amount: txAmt(o), left: 0, allDone: true, pay: true }], total: txAmt(o), due: o.date, done: true };
+    // сколько каждый бюджетный месяц откладывает «в будущее» до месяца платежа и дальше — это и есть взнос в конверт;
+    // остаток покрывается доходами самого месяца платежа
+    const R = distribute(); let need = o.amount;
+    for (let b = cb; b < o.bym && need > 0.5; b = ymAdd(b, 1)) {
+      const res = R.srcYear.filter(s => (s.start ? cb : s.bym) === b).flatMap(s => s.uses).filter(u => u.ubym && u.ubym >= o.bym).reduce((a, u) => a + u.amount, 0);
+      const x = Math.min(need, res); if (x > 0.5) { rows.push({ ym: b, amount: x }); need -= x; }
+    }
+    if (need > 0.5) rows.push({ ym: o.bym, amount: need, own: true });
+    let left = o.amount; for (const r of rows) { left -= r.amount; r.left = Math.max(0, left); }
+    return { kind: 'once', rows, total: o.amount, due: o.date };
+  }
+  const occ = genOcc(it.startMonth, effEnd(it), true).filter(o => o.it === it && o.status !== 'skip');
+  for (const o of occ) rows.push({ ym: o.ym, amount: txAmt(o), allDone: o.status === 'done', date: o.date });
+  const total = rows.reduce((a, r) => a + r.amount, 0);
+  let left = total; for (const r of rows) { left -= r.amount; r.left = Math.max(0, left); }
+  return { kind: 'debt', rows, total, end: effEnd(it), unit: 'мес' };
+}
+function payoutCard(it) {
+  const D = payoutData(it); if (!D || !D.rows.length) return '';
+  const once = D.kind === 'once', cb = curBym();
+  const paid = once ? 0 : D.rows.filter(r => r.allDone).reduce((a, r) => a + r.amount, 0);
+  const nowLeft = once ? null : D.total - paid;
+  const icon = it.asap || it.flexible ? '🤝' : once ? '🧾' : '🏦';
+  let prev = null;
+  const body = D.rows.map(r => {
+    const d = prev == null ? null : Math.round(r.amount - prev); prev = r.amount;
+    const cur = r.ym === cb;
+    return `<div class="prow ${r.allDone ? 'done' : ''} ${cur ? 'cur' : ''}"><span>${MON[+r.ym.slice(5) - 1].slice(0, 3)} ${r.ym.slice(2, 4)}${r.allDone ? ' ✓' : ''}${r.own ? '*' : ''}</span><span class="mono">${fmt(Math.round(r.amount))}</span>
+      <span class="mono ${d == null || Math.abs(d) < 1 ? 'mut' : d < 0 ? 'dn' : 'up'}">${d == null ? '—' : Math.abs(d) < 1 ? '0' : (d > 0 ? '+' : '−') + fmt(Math.abs(d))}</span><span class="mono">${r.left < 1 ? (once ? '✓ собрано' : '✓ закрыт') : fmt(Math.round(r.left))}</span></div>`;
+  }).join('');
+  const pct = once ? (D.done ? 1 : clamp(D.rows.filter(r => r.ym < cb).reduce((a, r) => a + r.amount, 0) / D.total)) : clamp(paid / D.total);
+  const sub = once ? `${D.done ? 'оплачено' : `срок ${longDate(D.due)} ${D.due.slice(0, 4)}`} · ${fmt(D.total)} ₸ · по месяцам — сколько откладывается в конверт`
+    : `${it.asap ? 'досрочно' : isCustom(it) ? 'своя сумма' : 'по графику'} · осталось ${fmt(Math.round(nowLeft))} из ${fmt(Math.round(D.total))}${D.end ? ` · закрытие ${MON[+D.end.slice(5) - 1]} ${D.end.slice(0, 4)}` : ''}`;
+  return `<div class="card"><div class="card-h"><span style="font-weight:600">${icon} ${esc(it.name)}</span><button class="link" data-item="${it.id}">правило</button></div>
+    <p class="sub" style="margin:-6px 0 8px">${sub}</p>
+    <div class="t-bar" style="margin:0 0 12px"><i style="width:${pct * 100}%;background:${once ? 'var(--gold)' : 'var(--good)'}"></i></div>
+    <div class="prow head"><span>Месяц</span><span>${once ? 'Отложить' : 'Сумма'}</span><span>Δ к пред.</span><span>${once ? 'Осталось собрать' : 'Остаток долга'}</span></div>
+    ${body}
+    ${it.asap ? '<p class="note" style="margin-top:8px">Суммы по бюджетным месяцам (с 15-го по 14-е). План пересчитывается каждый день: меньше потратил — больше уйдёт в этот долг.</p>' : once ? '<p class="note" style="margin-top:8px">По месяцам — сколько из доходов этого бюджета отложить в конверт под платёж. * — остаток, который закрывается доходами самого месяца платежа. Меняется вместе с лимитом и досрочными долгами.</p>' : ''}</div>`;
+}
+function renderPayouts() {
+  const its = payoutItems();
+  let h = calTabs();
+  if (!its.length) h += '<p class="empty">Здесь появятся долги с датой окончания, досрочные долги и крупные разовые платежи.</p>';
+  else h += its.sort((a, b) => (b.asap - a.asap) || ((a.endMonth === a.startMonth) - (b.endMonth === b.startMonth))).map(payoutCard).join('');
+  $('#calBox').innerHTML = h;
+}
 // главный экран: как разложены деньги, которые уже на карте
 function homeDistHtml() {
   const R = distribute(), s = R.src[0];
@@ -2284,6 +2386,7 @@ $('#app').addEventListener('click', e => {
   const a = e.target.closest('[data-act]'); if (!a) return;
   const act = a.dataset.act;
   if (act === 'adjust') openAdjust();
+  if (act === 'distyear') { distYear = !distYear; renderCal(); if (!distYear) window.scrollTo(0, 0); }
   if (act === 'envhelp') openEnvHelp();
   if (act === 'dayclose') openDayClose(dayKey());
   if (act === 'health') openHealth();
