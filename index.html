@@ -1034,7 +1034,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.10.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.10.1</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -2010,6 +2010,14 @@ function openOnb(step = 0, startNow = false) {
   for (const [k, v] of Object.entries(S.occ)) if (v.pre) onbTail[k] = v.st !== 'skip';
   $('#onb').classList.add('open'); renderOnb();
 }
+// доходы по расписанию в день старта — их НЕ надо включать в стартовый остаток, они придут отдельной строкой
+function dayIncomes(sd) { return genOcc(ymAdd(ymOf(sd), -1), ymOf(sd), true).filter(o => o.kind === 'income' && o.status !== 'skip' && (o.win ? o.early <= sd && o.date >= sd : o.date === sd)); }
+function dayIncHtml(sd) {
+  const inc = dayIncomes(sd);
+  if (!inc.length) return '';
+  return `<div class="banner yel" style="margin-top:4px"><span class="ic">💡</span><span>В этот день по расписанию придёт ${inc.map(o => `<b>${esc(o.name)} +${fmt(o.amount)}</b>`).join(', ')}. Его <b>не включайте</b> — введите, сколько денег будет <b>до</b> поступления. Если до зарплаты на счету пусто — оставьте 0.</span></div>`;
+}
+function sameAsIncome(v, sd) { return v > 0 && dayIncomes(sd).find(o => Math.abs(o.amount - v) <= Math.max(1000, o.amount * 0.02)); }
 function tailHtml(sd) {
   const t = tailOcc(sd);
   if (!t.length) return '';
@@ -2028,6 +2036,7 @@ function renderOnb() {
     ${S.schedule.length ? '' : '<button class="btn ghost block" style="margin-top:8px" id="onImp">Импортировать файл</button>'}`;
   else if (onbStartNow) h = `<div class="onb-body"><h2>Начинаем учёт ☀️</h2>
       <p>Введите, сколько сейчас денег на карте (на всех счетах, которые используете на жизнь). Всё, что пришло и ушло до этого момента, считается уже учтённым.</p>
+      ${dayIncHtml(today)}
       <div class="field"><input id="onBal" class="huge" inputmode="numeric" data-money placeholder="0" value="${onbExp}"><span class="u">₸</span></div>
       <p class="note">Вводите баланс до прихода сегодняшней зарплаты, а потом отметьте её «Пришло». Если она уже пришла — введите баланс с ней и отметьте «Уже учтено в балансе».</p>
       ${tailHtml(today)}</div>
@@ -2040,7 +2049,8 @@ function renderOnb() {
         <p class="note">Если сегодня уже пришла зарплата или прошёл платёж — вводите баланс после них, а событие в календаре отметьте «Уже учтено в балансе».</p>${tailHtml(today)}`
       : `<p>Например, день, когда придут деньги. До него можно смотреть план, лимит и распределение — от ожидаемой суммы.</p>
         <div class="field"><label>Дата старта</label><input id="onDate" type="date" min="${addDays(today, 1)}" value="${onbDate}"></div>
-        <div class="field"><label>Сколько будет на счету в этот день (можно примерно)</label><input id="onExp" class="huge" inputmode="numeric" data-money placeholder="0" value="${onbExp}"><span class="u">₸</span></div>
+        <div class="field"><label>Сколько будет на счету утром этого дня, до поступлений (можно примерно)</label><input id="onExp" class="huge" inputmode="numeric" data-money placeholder="0" value="${onbExp}"><span class="u">₸</span></div>
+        ${dayIncHtml(onbDate)}
         <p class="note">В день старта приложение спросит точный остаток. Если деньги придут раньше — на главном экране будет кнопка «Начать сейчас».</p>${tailHtml(onbDate)}`}
     </div>
     <div class="row"><button class="btn ghost" id="onBack" style="flex:0 0 auto">Назад</button><button class="btn grow" id="onDone">${onbMode === 'today' ? 'Готово' : 'Начать с ' + longDate(onbDate)}</button></div>`;
@@ -2065,6 +2075,8 @@ function finishOnb() {
   const applyTail = () => { for (const o of tail) S.occ[o.key] = onbTail[o.key] ? { pre: true } : { pre: true, st: 'skip' }; };
   if (later) {
     const e = parseMoney($('#onExp').value) || 0;
+    const dup = sameAsIncome(e, sd);
+    if (dup && !confirm(`${fmt(e)} ₸ — это похоже на «${dup.name}», которая придёт в этот день и уже есть в расписании. Если ввести её сюда, она посчитается дважды.\n\nОК — всё верно, это другие деньги\nОтмена — исправлю`)) return shake($('#onExp'));
     Object.assign(S.profile, { startBalance: null, startDate: sd, expBalance: e, onboarded: true });
     S.tx = []; S.occ = {}; applyTail();
     save(); $('#onb').classList.remove('open'); go('home');
@@ -2072,6 +2084,8 @@ function finishOnb() {
     return;
   }
   const v = parseMoney($('#onBal').value);
+  const dupNow = v != null && sameAsIncome(v, sd);
+  if (dupNow && dupNow.status !== 'done' && !confirm(`${fmt(v)} ₸ — это похоже на «${dupNow.name}». Если она уже пришла и вошла в этот остаток, после старта отметьте её «Пришло» с галочкой «Уже учтено в балансе», иначе она посчитается дважды.\n\nОК — понятно, продолжить`)) return shake($('#onBal'));
   if (v == null) return shake($('#onBal'));
   // учёт начинается с момента ввода баланса: всё, что было раньше, уже внутри баланса
   Object.assign(S.profile, { startBalance: v, startDate: sd, onboarded: true });
