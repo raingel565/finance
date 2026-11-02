@@ -1034,7 +1034,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.10.1</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.10.2</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1416,13 +1416,22 @@ function useLine(u, today) {
   const env = u.date > today;
   return `<div class="kv"><span>${useIcon(u.type)} ${esc(u.label)} · ${shortDate(u.date)}${part ? ` <small class="sub">часть из ${fmt(u.total)}</small>` : ''}${env ? ' <small class="env">конверт</small>' : ''}</span><span>${fmt(Math.round(u.amount))}</span></div>`;
 }
+// для показа: дни жизни, идущие подряд, склеиваются в одну строку, даже если между ними стоит платёж
+function mergeLive(uses) {
+  const out = []; let last = null;
+  for (const u of uses) {
+    if (u.type === 'live' && last && addDays(last.to, 1) === u.from) { last.to = u.to; last.days += u.days; last.amount += u.amount; continue; }
+    const c = { ...u }; out.push(c); if (c.type === 'live') last = c;
+  }
+  return out;
+}
 function srcCard(s, today, compact) {
   const pays = s.uses.filter(u => u.type !== 'live'), lives = s.uses.filter(u => u.type === 'live');
   const live = lives.reduce((a, u) => a + u.amount, 0);
   return `<div class="card dist">
     <div class="card-h"><span style="font-weight:600">${s.start ? '💳' : '💰'} ${esc(s.name)}</span><span class="mono pos" style="font-weight:700">${s.start ? '' : '+'}${fmt(Math.round(s.amount))}</span></div>
     <div class="sub" style="margin:-6px 0 8px">${s.start ? `на начало дня${S.profile.floor ? ', без неприкосновенного остатка' : ''}` : `${longDate(s.date)}, ${wd(s.date)}`}</div>
-    ${s.uses.length ? s.uses.map(u => useLine(u, today)).join('') : ''}
+    ${s.uses.length ? mergeLive(s.uses).map(u => useLine(u, today)).join('') : ''}
     ${s.free > 0.5 ? `<div class="kv"><span>➡️ Свободно — в следующие месяцы и цели</span><span style="color:var(--gold)">${fmt(Math.round(s.free))}</span></div>` : ''}
     ${!compact ? `<div class="dist-sum"><span>🍽 ${fmt(Math.round(live))}</span><span>📌 ${fmt(Math.round(pays.reduce((a, u) => a + u.amount, 0)))}</span>${s.free > 0.5 ? `<span>➡️ ${fmt(Math.round(s.free))}</span>` : ''}</div>` : ''}
   </div>`;
