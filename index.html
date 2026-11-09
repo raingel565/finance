@@ -71,6 +71,11 @@ input,select{font:inherit;color:inherit}
 .metric .n{font-family:var(--mono);font-size:18px;font-weight:700;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .metric .n small{font-size:12px;color:var(--muted);font-weight:500}
 .metric.tap{cursor:pointer}
+.stl{max-height:52vh;overflow:auto;margin:0 -4px;padding:0 4px}
+.str{padding:9px 0;border-bottom:1px dashed var(--line)}
+.str.mut{opacity:.5}
+.str .st1{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:6px}
+.str select{width:100%;background:var(--card2,rgba(255,255,255,.05));color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px}
 .lrow{padding:9px 0;border-bottom:1px dashed var(--line)}
 .lrow:last-of-type{border-bottom:0}
 .lrow .lt{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
@@ -684,6 +689,163 @@ function openLifeNorms() {
   $('#lnOk').onclick = () => { $$('[data-ln]').forEach(inp => { const v = parseMoney(inp.value); const i = its.find(x => x.id === inp.dataset.ln); if (i && v != null && v >= 0) i.amount = v; }); afterChange('Нормы сохранены'); };
 }
 
+/* ======================= импорт выписок ======================= */
+// PDF читается прямо на телефоне (pdf.js), никуда не отправляется. Из выписки берутся только расходы
+// с даты старта учёта; каждую трату вы сами относите к статье. Уже загруженные строки повторно не показываются.
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let pdfjsReady = null;
+function loadPdfjs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfjsReady) return pdfjsReady;
+  pdfjsReady = new Promise((ok, bad) => {
+    const sc = document.createElement('script'); sc.src = PDFJS + 'pdf.min.js';
+    sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; ok(window.pdfjsLib); };
+    sc.onerror = () => { pdfjsReady = null; bad(new Error('Не удалось загрузить модуль чтения PDF — нужен интернет')); };
+    document.head.appendChild(sc);
+  });
+  return pdfjsReady;
+}
+// строки страницы: элементы текста группируются по высоте, внутри — по x
+async function pdfRows(buf) {
+  const lib = await loadPdfjs();
+  const pdf = await lib.getDocument({ data: buf }).promise, out = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const tc = await (await pdf.getPage(p)).getTextContent();
+    const its = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ x: i.transform[4], y: i.transform[5], s: i.str.trim() }));
+    its.sort((a, b) => b.y - a.y || a.x - b.x);
+    let cur = null;
+    for (const it of its) { if (!cur || Math.abs(cur.y - it.y) > 2.5) { cur = { y: it.y, c: [] }; out.push(cur); } cur.c.push(it); }
+  }
+  return out.map(r => r.c.sort((a, b) => a.x - b.x));
+}
+const stNum = s => +String(s).replace(/[\s ₸+]/g, '').replace(',', '.');
+function parseKaspi(rows) {
+  const ops = [];
+  for (const c of rows) {
+    const m = c[0] && c[0].s.match(/^(\d\d)\.(\d\d)\.(\d\d)$/);
+    if (m && c[1] && /₸/.test(c[1].s)) {
+      const sign = /^-/.test(c[1].s) ? -1 : 1;
+      ops.push({ date: `20${m[3]}-${m[2]}-${m[1]}`, amount: sign * Math.abs(stNum(c[1].s)), kind: (c[2] || {}).s || '', desc: c.slice(3).map(x => x.s).join(' ') });
+    }
+  }
+  return ops;
+}
+function parseHalyk(rows) {
+  const ops = []; let cur = null;
+  for (const c of rows) {
+    const m = c[0] && c[0].s.match(/^(\d\d)\.(\d\d)\.(\d{4})$/);
+    if (m && c[1] && /^\d\d\.\d\d\.\d{4}$/.test(c[1].s)) {
+      const ki = c.findIndex(x => x.s === 'KZT');
+      const nums = ki > 0 ? c.slice(ki + 1).filter(x => /^-?[\d\s ]+,\d\d$/.test(x.s)).map(x => stNum(x.s)) : [];
+      if (nums.length >= 2) {
+        const [inc, exp, com = 0] = nums;
+        const desc = c.slice(2, ki).filter(x => !/^-?[\d\s ]+,\d\d$/.test(x.s)).map(x => x.s).join(' ');
+        cur = { date: `${m[3]}-${m[2]}-${m[1]}`, amount: inc > 0 ? inc : -(Math.abs(exp) + Math.abs(com)), kind: desc, desc: '' };
+        ops.push(cur); continue;
+      }
+    }
+    // продолжение описания: строка без даты в колонке «Описание»
+    if (cur && c.length <= 2 && c[0].x > 100 && c[0].x < 220 && !/Выписка|операции|Дата/.test(c[0].s)) { cur.desc = (cur.desc + ' ' + c.map(x => x.s).join(' ')).trim(); continue; }
+    if (!c.some(x => x.x > 100 && x.x < 220)) cur = null;
+  }
+  return ops.map(o => ({ ...o, desc: (o.desc || '').replace(/^коммерсанта\s*/i, '') || o.kind, kind: o.kind.replace(/\s*у$/, '') }));
+}
+// подсказки: сначала ваш прошлый выбор для этого получателя, потом правила
+const merchKey = d => d.toLowerCase().replace(/[^a-zа-яёәіңғүұқөһ0-9]+/gi, ' ').replace(/\b\d+\b/g, '').trim().slice(0, 40);
+function stmtGuess(o) {
+  const t = o.kind + ' ' + o.desc, mk = merchKey(o.desc);
+  const mem = (S.meta.mcat || {})[mk]; if (mem) return mem;
+  if (/депозит|Погашение банковской|Перевод на кредит|Погашение кредита|на свой|своего счета|Freedom Finance|Halyk Bank\*|Kaspi Bank\*|OpenAPI/i.test(t)) return '__skip';
+  if (/yandex\.?go|яндекс go|uber|indrive|такси/i.test(t)) return 'taxi';
+  if (/avtobys|onay|оплата проезда|проезд|jet\.? ?самокат|whoosh/i.test(t)) return 'transit';
+  if (/magazin|магазин|supermarket|маркет|market|small|перекуcity|перекрест|magnum|galmart|anvar|daily/i.test(t)) return 'groc';
+  if (/комиссия/i.test(t)) return 'other';
+  return '';
+}
+function stmtCatOptions(sel) {
+  const life = lifeOn() ? S.life.items.filter(i => !i.free) : [];
+  const lifeIds = new Set(life.map(i => i.id));
+  const opts = life.map(i => [i.id, `${i.e} ${i.n}`])
+    .concat([['other', lifeOn() ? '🍫 Свободное (прочее)' : '📦 Другое']])
+    .concat(S.cats.filter(c => !lifeIds.has(c.id) && c.id !== 'other').map(c => [c.id, `${c.e} ${c.n}`]))
+    .concat([['__dup', '↩ уже внесено вручную'], ['__skip', '⤫ не трата (перевод, кредит, депозит)']]);
+  return `<option value="" ${!sel ? 'selected' : ''}>— выберите статью —</option>` + opts.map(([v, l]) => `<option value="${v}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+}
+let stmtState = null;
+function openStmt() {
+  const bank = (S.meta.lastBank) || 'kaspi';
+  stmtState = { bank, ops: [] };
+  const draw = () => {
+    const st = stmtState;
+    let body = '';
+    if (st.err) body = `<div class="banner red"><span class="ic">⚠️</span><span>${esc(st.err)}</span></div>`;
+    else if (st.busy) body = '<p class="sub" style="margin:14px 0">Читаю выписку…</p>';
+    else if (st.loaded) {
+      const rows = st.ops;
+      body = rows.length ? `<p class="sub" style="margin:10px 0 6px">${rows.length} ${plural(rows.length, 'расход', 'расхода', 'расходов')} с ${longDate(st.from)}${st.hidden ? ` · ${st.hidden} уже загружено раньше` : ''}. Отнесите каждый к статье.</p>
+        <div class="stl">${rows.map((o, i) => `<div class="str ${o.cat === '__skip' || o.cat === '__dup' ? 'mut' : ''}"><div class="st1"><span>${shortDate(o.date)} · <b>${esc(o.desc)}</b>${o.dupOf ? ' <small class="sub">похоже, уже внесено</small>' : ''}</span><span class="mono">−${fmt(Math.abs(o.amount))}</span></div>
+          <select data-si="${i}">${stmtCatOptions(o.cat)}</select></div>`).join('')}</div>
+        <div class="kv" style="margin-top:10px"><span>Будет добавлено</span><span id="stSum"></span></div>
+        <button class="btn green block" id="stOk" style="margin-top:8px">Добавить</button>
+        <p class="note" style="margin-top:8px">Строки без выбранной статьи не добавятся и покажутся при следующей загрузке. «Не трата» и «уже внесено» запоминаются и больше не появятся.</p>`
+        : `<p class="sub" style="margin:14px 0">Новых расходов с ${longDate(st.from)} нет${st.hidden ? ` (${st.hidden} уже загружено раньше)` : ''}.</p>`;
+    }
+    openSheet(`<h2>📄 Выписка</h2><p class="sub">Файл читается на телефоне и никуда не отправляется.</p>
+      <div class="stabs"><button data-bank="kaspi" class="${st.bank === 'kaspi' ? 'on' : ''}">Kaspi Gold</button><button data-bank="halyk" class="${st.bank === 'halyk' ? 'on' : ''}">Halyk</button></div>
+      <button class="btn ghost block" id="stPick">${st.loaded ? 'Выбрать другой PDF' : 'Выбрать PDF'}</button>
+      <input type="file" id="stFile" accept="application/pdf,.pdf" style="display:none">
+      ${body}`);
+    $('#stPick').onclick = () => $('#stFile').click();
+    $('#stFile').onchange = e => { const f = e.target.files[0]; if (f) readStmt(f, draw); };
+    if ($('#stOk')) { $('#stOk').onclick = saveStmt; stmtSum(); }
+    sheetHandler = e => { const b = e.target.closest('[data-bank]'); if (b) { st.bank = b.dataset.bank; S.meta.lastBank = st.bank; st.loaded = false; st.ops = []; st.err = null; draw(); } };
+    sheetInput = e => { if (e.target.dataset.si != null) { st.ops[+e.target.dataset.si].cat = e.target.value; e.target.closest('.str').classList.toggle('mut', /^__/.test(e.target.value)); stmtSum(); } };
+  };
+  draw();
+}
+function stmtSum() {
+  const add = stmtState.ops.filter(o => o.cat && !/^__/.test(o.cat));
+  if ($('#stSum')) $('#stSum').textContent = `${add.length} · ${fmt(add.reduce((a, o) => a + Math.abs(o.amount), 0))} ₸`;
+}
+async function readStmt(file, draw) {
+  const st = stmtState; st.busy = true; st.err = null; st.loaded = false; draw();
+  try {
+    const rows = await pdfRows(await file.arrayBuffer());
+    const all = st.bank === 'kaspi' ? parseKaspi(rows) : parseHalyk(rows);
+    if (!all.length) throw new Error(`Не нашёл операций. Это точно выписка ${st.bank === 'kaspi' ? 'Kaspi Gold' : 'Halyk'}? Попробуйте переключить банк вверху.`);
+    const from = S.profile.startDate || dayKey(), seen = S.meta.stmtSeen || {}, cnt = {};
+    let hidden = 0; const ops = [];
+    for (const o of all) {
+      if (o.amount >= 0 || o.date < from) continue;
+      const base = `${st.bank}|${o.date}|${Math.abs(o.amount)}|${o.desc}`; cnt[base] = (cnt[base] || 0) + 1;
+      const sig = base + '|' + cnt[base];
+      if (seen[sig]) { hidden++; continue; }
+      const a = Math.abs(o.amount);
+      const dupOf = S.tx.find(t => t.type === 'expense' && !t.sig && t.date === o.date && Math.abs(t.amount - a) < 1 && !ops.some(x => x.dupOf === t.id));
+      let cat = stmtGuess(o);
+      if (dupOf && cat !== '__skip') cat = '__dup';
+      ops.push({ ...o, sig, cat, dupOf: dupOf ? dupOf.id : null });
+    }
+    ops.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    Object.assign(st, { ops, hidden, from, loaded: true, busy: false });
+  } catch (e) { st.busy = false; st.err = e.message || String(e); }
+  draw();
+}
+function saveStmt() {
+  const st = stmtState; let n = 0, sum = 0;
+  S.meta.stmtSeen = S.meta.stmtSeen || {}; S.meta.mcat = S.meta.mcat || {};
+  for (const o of st.ops) {
+    if (!o.cat) continue;
+    S.meta.stmtSeen[o.sig] = 1;
+    if (o.cat !== '__dup') S.meta.mcat[merchKey(o.desc)] = o.cat;
+    else if (o.dupOf) { const t = S.tx.find(x => x.id === o.dupOf); if (t) t.sig = o.sig; }   // ручная запись теперь связана с выпиской
+    if (/^__/.test(o.cat)) continue;
+    S.tx.push({ id: uid(), ts: new Date().toISOString(), type: 'expense', amount: Math.abs(o.amount), date: o.date, cat: o.cat, note: o.desc, sig: o.sig, src: st.bank });
+    n++; sum += Math.abs(o.amount);
+  }
+  afterChange(n ? `Добавлено ${n} ${plural(n, 'трата', 'траты', 'трат')} на ${fmt(sum)} ₸` : 'Отметки сохранены');
+}
+
 /* ======================= баланс ======================= */
 const txSign = t => t.type === 'income' ? 1 : t.type === 'adjust' ? 1 : t.type === 'move' ? 0 : -1;
 const balance = () => (S.profile.startBalance != null ? S.profile.startBalance : (S.profile.expBalance || 0)) + S.tx.reduce((s, t) => t.noBal ? s : s + txSign(t) * t.amount, 0);
@@ -1049,6 +1211,7 @@ function renderLog() {
       <div class="metric"><div class="l">Платежи</div><div class="n">${sMoney(pay)}</div></div></div>
     <div class="filters">${[['all', 'Все'], ['expense', 'Траты'], ['income', 'Доходы'], ['payment', 'Платежи'], ['save', 'Накопления'], ['adjust', 'Корректировки']].map(([k, l]) => `<button data-lf="${k}" class="${k === logFilter ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="row" style="margin-top:10px"><button class="btn sm ghost grow" data-act="addIncome">+ Доход</button><button class="btn sm ghost grow" data-act="adjust">Сверить баланс</button></div>
+    <button class="btn sm block" style="margin-top:8px" data-act="stmt">📄 Загрузить выписку (Kaspi / Halyk)</button>
   </div>`;
   if (logFilter === 'all') h += summaryHtml(logYm, false);
   if (logFilter === 'all' || logFilter === 'expense') h += statsHtml(logYm);
@@ -1172,7 +1335,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.14.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.15.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -2571,6 +2734,7 @@ $('#app').addEventListener('click', e => {
   if (act === 'adjust') openAdjust();
   if (act === 'distyear') { distYear = !distYear; renderCal(); if (!distYear) window.scrollTo(0, 0); }
   if (act === 'envhelp') openEnvHelp();
+  if (act === 'stmt') openStmt();
   if (act === 'life') { if (lifeOn()) openLifeNorms(); else { S.life = { items: LIFE_DEF.map(normLife) }; ensureLifeCats(); afterChange('Статьи жизни включены — настройте нормы'); setTimeout(openLifeNorms, 400); } }
   if (act === 'dayclose') openDayClose(dayKey());
   if (act === 'health') openHealth();

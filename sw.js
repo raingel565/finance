@@ -1,6 +1,6 @@
 // Finance Flow — service worker
 // При каждом обновлении приложения меняйте версию, чтобы телефоны подтянули новые файлы.
-const VERSION = 'ff-v0.14.0';
+const VERSION = 'ff-v0.15.0';
 const SHELL = [
   './',
   './index.html',
@@ -39,7 +39,8 @@ self.addEventListener('fetch', e => {
   }
 
   // шрифты Google: кэш навсегда после первой загрузки
-  if (url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com')) {
+  // шрифты Google и модуль чтения PDF (pdf.js): кэш навсегда после первой загрузки
+  if (url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com') || url.hostname === 'cdnjs.cloudflare.com') {
     e.respondWith(
       caches.match(req).then(hit => hit || fetch(req).then(res => {
         const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); return res;
