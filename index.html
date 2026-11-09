@@ -71,6 +71,10 @@ input,select{font:inherit;color:inherit}
 .metric .n{font-family:var(--mono);font-size:18px;font-weight:700;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .metric .n small{font-size:12px;color:var(--muted);font-weight:500}
 .metric.tap{cursor:pointer}
+.lrow{padding:9px 0;border-bottom:1px dashed var(--line)}
+.lrow:last-of-type{border-bottom:0}
+.lrow .lt{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
+.lrow .ls{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:5px;gap:8px}
 .prow{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.2fr;gap:6px;padding:8px 2px;border-bottom:1px dashed var(--line);font-size:13px;align-items:center}
 .prow span:not(:first-child){text-align:right}
 .prow.head{font-size:10.5px;color:var(--muted);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--line)}
@@ -265,6 +269,8 @@ details.closed summary::-webkit-details-marker{display:none}
 .t-v{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-.02em;margin-top:auto}
 .t-s{font-size:11.5px;color:var(--muted);line-height:1.4;margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .t-bar{height:5px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
+.lrow .t-bar{margin-top:0}
+.t-bar i{display:block;height:100%;border-radius:5px}
 .t-bar i{display:block;height:100%;border-radius:5px}
 .monthnav.sm button{width:30px;height:30px;font-size:16px}
 @media (max-width:360px){.t-v{font-size:21px}.tile{padding:12px}}
@@ -366,6 +372,8 @@ function normalize(d) {
   if (!o.cats.length) o.cats = b.cats;
   if (!o.occ || typeof o.occ !== 'object') o.occ = {};
   o.schedule = o.schedule.map(normItem);
+  if (!o.life || !Array.isArray(o.life.items)) o.life = { items: [] };
+  o.life.items = o.life.items.map(normLife);
   return o;
 }
 function normItem(it) {
@@ -375,7 +383,7 @@ function normItem(it) {
     flexible: !!it.flexible, mode: it.mode === 'dec' ? 'dec' : 'fixed', total: it.total ? Math.round(+it.total) : null,
     startMonth: it.startMonth || ymOf(dayKey()), endMonth: it.endMonth || null, prevMonth: !!it.prevMonth,
     overrides: it.overrides && typeof it.overrides === 'object' ? it.overrides : {}, paused: !!it.paused, isDebt: !!it.isDebt,
-    pay: it.pay === 'custom' ? 'custom' : 'plan', wd: it.kind === 'income' && (it.wd === 1 || it.wd === 2) ? it.wd : 0, asap: !!it.asap && it.kind !== 'income', payAmt: it.payAmt ? Math.round(+it.payAmt) : null, payLeft: it.payLeft ? Math.round(+it.payLeft) : null, payFrom: it.payFrom || null };
+    pay: it.pay === 'custom' ? 'custom' : 'plan', asapBy: /^\d{4}-\d{2}-\d{2}$/.test(it.asapBy || '') ? it.asapBy : null, save: !!it.save, returned: it.returned || null, wd: it.kind === 'income' && (it.wd === 1 || it.wd === 2) ? it.wd : 0, asap: !!it.asap && it.kind !== 'income', payAmt: it.payAmt ? Math.round(+it.payAmt) : null, payLeft: it.payLeft ? Math.round(+it.payLeft) : null, payFrom: it.payFrom || null };
 }
 let S = (() => { try { return normalize(JSON.parse(localStorage.getItem(KEY))); } catch (e) { return defaults(); } })();
 let ver = 0;
@@ -561,18 +569,30 @@ function planDebt(it, today, B0, others, floor) {
     const a = Math.min(r, i === 0 ? Math.max(0, it.amount - paidNow) : it.amount);
     if (a > 0) { base.push({ d: Math.min(d, H), a: -a }); r -= a; }
   }
-  const Lt = calcL(B0, others.concat(base), floor).L;
   const cum = calcL(B0, others, floor).cum;
-  const C = new Float64Array(H + 1); let m = Infinity;
-  for (let d = H; d >= 0; d--) { m = Math.min(m, B0 + cum[d] - floor - Lt * (d + 1)); C[d] = m; }
   const days = [...new Set([d0].concat(others.filter(e => e.a > 0 && e.d >= d0).map(e => e.d)))].sort((a, b) => a - b);
-  const plan = []; let paid = 0;
-  for (const d of days) {
-    if (paid >= rem - 0.5) break;
-    let x = Math.floor(Math.min(rem - paid, C[d] - paid));
-    if (x < Math.min(10000, rem - paid)) continue;         // мелочь (< 10 000) не дробим — копится до следующего поступления
-    plan.push({ d, a: x }); paid += x;
+  const C = new Float64Array(H + 1);
+  const greedy = Lt => {
+    let m = Infinity;
+    for (let d = H; d >= 0; d--) { m = Math.min(m, B0 + cum[d] - floor - Lt * (d + 1)); C[d] = m; }
+    const plan = []; let paid = 0;
+    for (const d of days) {
+      if (paid >= rem - 0.5) break;
+      let x = Math.floor(Math.min(rem - paid, C[d] - paid));
+      if (x < Math.min(10000, rem - paid)) continue;         // мелочь (< 10 000) не дробим — копится до следующего поступления
+      plan.push({ d, a: x }); paid += x;
+    }
+    return { plan, paid };
+  };
+  // планка лимита: либо «не ниже, чем при минимальном темпе», либо (если задан срок) — максимальный лимит, при котором долг закрыт к сроку
+  let Lt = calcL(B0, others.concat(base), floor).L;
+  if (it.asapBy && it.asapBy >= today) {
+    const dBy = diffDays(today, it.asapBy);
+    const ok = L => { const g = greedy(L); return g.paid >= rem - 0.5 && g.plan[g.plan.length - 1].d <= dBy; };
+    let lo = 0, hi = Math.max(0, calcL(B0, others, floor).L);
+    if (ok(lo)) { for (let i = 0; i < 26; i++) { const mid = (lo + hi) / 2; if (ok(mid)) lo = mid; else hi = mid; } Lt = Math.floor(lo); }
   }
+  let { plan, paid } = greedy(Lt);
   // если план не уложился (например, уже есть разрыв) — остаток по минимальному темпу после последней даты
   let last = plan.length ? plan[plan.length - 1].d : d0, left = rem - paid;
   for (let bm = ymAdd(bymOfDate(addDays(today, last)), 1); left > 0.5; bm = ymAdd(bm, 1)) {
@@ -580,6 +600,88 @@ function planDebt(it, today, B0, others, floor) {
     plan.push({ d, a }); left -= a;
   }
   return plan.map(p => { const date = addDays(today, p.d); return { d: p.d, a: -p.a, o: debtOcc(it, date, p.a, `${it.id}|p${date}`) }; });
+}
+
+// проценты по депозиту: увеличивают накопленное, баланс карты не меняют
+function openDebtInterest(id) {
+  const it = item(id); if (!it) return;
+  openSheet(`<h2>% по депозиту</h2><p class="sub">${esc(it.name)} · банк начислил проценты — они уменьшают, сколько осталось накопить. Баланс карты не меняется.</p>
+    <div class="field"><input id="diAmt" class="huge" inputmode="numeric" data-money placeholder="0"><span class="u">₸</span></div>
+    <button class="btn green block" id="diOk">Добавить</button>`);
+  setTimeout(() => $('#diAmt').focus(), 250);
+  const ok = () => {
+    const a = parseMoney($('#diAmt').value); if (!a || a <= 0) return shake($('#diAmt'));
+    const t = { id: uid(), ts: new Date().toISOString(), type: 'payment', amount: a, date: dayKey(), name: '% по депозиту → ' + it.name, noBal: true };
+    S.tx.push(t); S.occ[`${it.id}|d${uid()}`] = { st: 'done', txId: t.id };
+    afterChange(`+${fmt(a)} ₸ процентов · осталось ${money(debtLeft(it))}`);
+  };
+  $('#diOk').onclick = ok; onEnter($('#diAmt'), ok);
+}
+
+/* ======================= статьи жизни ======================= */
+// Дневной лимит L — это ВСЁ на жизнь. Он делится на статьи: продукты, такси, проезд (по нормам), «свободное» (резерв)
+// и одну «остаточную» статью (ужины) — ей достаётся всё, что остаётся. Перерасход где угодно уменьшает L,
+// а значит в первую очередь остаточную статью. Трата относится к статье по категории; прочие категории — в «свободное».
+function normLife(i) {
+  return { id: String(i.id || uid()), e: i.e || '•', n: i.n || 'Статья', mode: ['rate', 'workday', 'month', 'rest'].includes(i.mode) ? i.mode : 'month',
+    amount: Math.round(+i.amount || 0), per: Math.max(1, Math.round(+i.per || 30)), free: !!i.free };
+}
+const LIFE_DEF = [
+  { id: 'groc', e: '🛒', n: 'Продукты', mode: 'rate', amount: 45000, per: 14 },
+  { id: 'taxi', e: '🚕', n: 'Такси', mode: 'rate', amount: 8000, per: 7 },
+  { id: 'transit', e: '🚌', n: 'Проезд', mode: 'workday', amount: 240 },
+  { id: 'dinner', e: '🍝', n: 'Ужины и встречи', mode: 'rest' },
+  { id: 'free', e: '🍫', n: 'Свободное', mode: 'month', amount: 10000, free: true }
+];
+const lifeOn = () => !!(S.life && S.life.items && S.life.items.length);
+function ensureLifeCats() {
+  const add = S.life.items.filter(i => !i.free && !S.cats.some(c => c.id === i.id)).map(i => ({ id: i.id, e: i.e, n: i.n, custom: true }));
+  if (add.length) S.cats = add.concat(S.cats);
+}
+const lifeOfCat = cid => { const its = S.life.items; return its.find(i => i.id === cid && !i.free) || its.find(i => i.free) || null; };
+function lifePlan() {
+  if (!lifeOn() || waiting()) return null;
+  const F = forecast(), b = curBym(), today = F.today, sd = S.profile.startDate;
+  const ms = sd && sd > bStart(b) ? sd : bStart(b), me = bEnd(b);
+  const days = diffDays(ms, me) + 1, el = diffDays(ms, today) + 1, left = diffDays(today, me) + 1;
+  const ex = S.tx.filter(t => t.type === 'expense' && !t.noBal && t.date >= ms && t.date <= me);
+  const before = ex.filter(t => t.date < today).reduce((a, t) => a + t.amount, 0);
+  const total = before + Math.max(0, F.L) * left;
+  let wdN = 0, wdEl = 0;
+  for (let k = ms; k <= me; k = addDays(k, 1)) if (!workOff(k)) { wdN++; if (k <= today) wdEl++; }
+  const rows = S.life.items.map(i => {
+    const alloc = i.mode === 'rate' ? i.amount * days / i.per : i.mode === 'workday' ? i.amount * wdN : i.mode === 'month' ? i.amount * days / 30.44 : 0;
+    const exp = i.mode === 'workday' ? i.amount * wdEl : i.mode === 'rest' ? null : alloc * el / days;
+    const spent = ex.filter(t => (lifeOfCat(t.cat) || {}).id === i.id).reduce((a, t) => a + t.amount, 0);
+    return { ...i, alloc: Math.round(alloc), exp, spent };
+  });
+  const rest = rows.find(r => r.mode === 'rest');
+  if (rest) rest.alloc = Math.round(total - rows.filter(r => r !== rest).reduce((a, r) => a + r.alloc, 0));
+  const free = rows.find(r => r.free);
+  return { rows, total, days, left, ms, me, free, L: Math.max(0, F.L) };
+}
+function lifeCardHtml(P) {
+  if (!P) return '';
+  const row = r => {
+    const rem = r.alloc - r.spent, p = r.alloc > 0 ? clamp(r.spent / r.alloc) : 1;
+    // покупки бывают крупными (закупка на 2 недели) — «быстрее плана» только если ушли дальше, чем на одну порцию вперёд
+    const fast = r.exp != null && r.spent > r.exp + (r.mode === 'rate' ? r.amount : r.mode === 'workday' ? r.amount * 2 : r.alloc * 0.25);
+    const rule = r.mode === 'rate' ? `${fmt(r.amount)} / ${r.per === 7 ? 'неделю' : r.per === 14 ? '2 недели' : r.per + ' дн'}` : r.mode === 'workday' ? `${fmt(r.amount)} × рабочие дни` : r.mode === 'month' ? `${fmt(r.amount)} / мес` : 'всё, что остаётся';
+    return `<div class="lrow"><div class="lt"><span>${r.e} ${esc(r.n)}</span><span class="mono" style="color:${rem < 0 ? 'var(--bad)' : 'var(--text)'}">${rem < 0 ? '−' : ''}${fmt(Math.abs(Math.round(rem)))}</span></div>
+      <div class="t-bar"><i style="width:${p * 100}%;background:${rem < 0 ? 'var(--bad)' : fast ? 'var(--warn)' : r.free ? 'var(--gold)' : 'var(--accent)'}"></i></div>
+      <div class="ls"><span>${fmt(r.spent)} из ${fmt(r.alloc)} · ${rule}</span><span style="color:${fast ? 'var(--warn)' : 'var(--muted)'}">${rem < 0 ? 'перерасход' : fast ? `быстрее плана на ${fmt(Math.round(r.spent - r.exp))}` : 'осталось'}</span></div></div>`;
+  };
+  return `<div class="card"><div class="card-h"><span class="card-t">Статьи жизни · до ${shortDate(P.me)}</span><button class="link" data-act="life">нормы</button></div>
+    <p class="sub" style="margin:-6px 0 10px">На жизнь в этом бюджетном месяце ${fmt(Math.round(P.total))} ₸ (в среднем ${fmt(Math.round(P.L))}/день) — уже разложены по статьям.</p>
+    ${P.rows.map(row).join('')}
+    <p class="note" style="margin-top:8px">Трата попадает в статью по категории; всё, что не продукты, такси, проезд и ужины, — в «Свободное». Перерасход любой статьи уменьшает лимит, а с ним — ${esc((P.rows.find(r => r.mode === 'rest') || {}).n || 'остаток')}.</p></div>`;
+}
+function openLifeNorms() {
+  const its = S.life.items;
+  openSheet(`<h2>Нормы статей жизни</h2><p class="sub">Сколько закладывать. «${esc((its.find(i => i.mode === 'rest') || {}).n || 'Остаток')}» получает всё, что остаётся от лимита.</p>
+    ${its.filter(i => i.mode !== 'rest').map(i => `<div class="field"><label>${i.e} ${esc(i.n)} — ${i.mode === 'rate' ? `за ${i.per} дн` : i.mode === 'workday' ? 'за рабочий день' : 'в месяц'}</label><input data-ln="${i.id}" inputmode="numeric" data-money value="${fmt(i.amount)}"><span class="u">₸</span></div>`).join('')}
+    <button class="btn block" id="lnOk">Сохранить</button>`);
+  $('#lnOk').onclick = () => { $$('[data-ln]').forEach(inp => { const v = parseMoney(inp.value); const i = its.find(x => x.id === inp.dataset.ln); if (i && v != null && v >= 0) i.amount = v; }); afterChange('Нормы сохранены'); };
 }
 
 /* ======================= баланс ======================= */
@@ -785,11 +887,22 @@ function renderHome() {
     h += `<div class="banner red"><span class="ic">⚠️</span><span><b>Кассовый разрыв ${longDate(F.gap.date)}</b> (${relDay(F.gap.date)}): даже без трат не хватит <b>${money(F.gap.short)}</b> на обязательные платежи.
       ${F.gap.d === 0 ? 'Проверьте баланс и неподтверждённые доходы.' : 'Стоит заранее договориться о переносе платежа или найти доход.'}</span></div>`;
   }
+  const LP = lifePlan(), FR = LP && LP.free;
+  if (FR) {
+    const fl = FR.alloc - FR.spent, fc = fl < 0 ? 'var(--bad)' : fl < FR.alloc * .25 ? 'var(--warn)' : 'var(--good)';
+    document.documentElement.style.setProperty('--hc', fc);
+    h += `<div class="card hero"><div class="hero-in">
+      <div class="ring">${ringSvg(FR.alloc > 0 ? fl / FR.alloc : 0, fc)}<div class="rv"><div><b>${FR.alloc > 0 ? Math.round(clamp(fl / FR.alloc) * 100) : 0}%</b>свободного</div></div></div>
+      <div class="grow"><div class="lim-l">Свободно до ${shortDate(LP.me)}</div>
+        <div class="lim-v" style="color:${fc}">${fl < 0 ? '−' : ''}${fmt(Math.abs(Math.round(fl)))} <span style="font-size:18px">₸</span></div>
+        <div class="lim-s">≈ <b>${fmt(Math.max(0, Math.round(fl / LP.left)))}</b>/день на мелочи<br>на жизнь всего <b>${fmt(Math.round(L))}</b>/день · сегодня <b>${fmt(F.spent)}</b></div></div></div>`;
+  } else
   h += `<div class="card hero"><div class="hero-in">
       <div class="ring">${ringSvg(L > 0 ? left / L : 0, col)}<div class="rv"><div><b>${L > 0 ? Math.round(clamp(left / L) * 100) : 0}%</b>лимита</div></div></div>
       <div class="grow"><div class="lim-l">Можно сегодня</div>
         <div class="lim-v" style="color:${col}">${left < 0 ? '−' : ''}${fmt(Math.abs(Math.round(left)))} <span style="font-size:18px">₸</span></div>
-        <div class="lim-s">лимит <b>${fmt(Math.round(L))}</b>/день<br>потрачено <b>${fmt(F.spent)}</b></div></div></div>
+        <div class="lim-s">лимит <b>${fmt(Math.round(L))}</b>/день<br>потрачено <b>${fmt(F.spent)}</b></div></div></div>`;
+  h += `
     <div class="hero-foot">
       ${envOn() && Math.abs(envBalance()) >= 1 ? `<div class="metric tap" data-act="adjust"><div class="l">На карте ✎</div><div class="n">${money(cardBalance())}</div><div class="sub" style="font-size:11px;margin-top:2px">+ ${fmt(Math.round(envBalance()))} в конвертах</div></div>` : `<div class="metric tap" data-act="adjust"><div class="l">Баланс ✎</div><div class="n">${money(F.bal)}</div></div>`}
       <div class="metric">${F.nextInc ? `<div class="l">След. доход</div><div class="n">${shortDate(F.nextInc.o.date)} <small>${F.nextInc.d === 0 ? 'сегодня' : F.nextInc.d + ' дн'}</small></div>` : '<div class="l">След. доход</div><div class="n">—</div>'}</div>
@@ -808,11 +921,12 @@ function renderHome() {
         const late = o.date < today, inc = o.kind === 'income';
         return `<li><span class="emo">${inc ? '💰' : '📌'}</span><div class="grow"><div>${esc(o.name)} <span class="v ${inc ? 'pos' : ''}" style="font-size:13px">${inc ? '+' : '−'}${fmt(o.amount)}</span></div>
           <div class="d">${late ? (inc ? `ожидался ${shortDate(o.date)} — не учтён в лимите` : `был ${shortDate(o.date)} — просрочен?`) : o.win ? `окно ${o.it.day}–${o.it.dayTo}, сегодня может прийти` : 'сегодня'}</div></div>
-          <button class="btn sm ${inc ? 'green' : ''}" data-occ-ok="${o.key}">${inc ? 'Пришло' : o.asap ? 'Отдал' : 'Оплачено'}</button>
+          <button class="btn sm ${inc ? 'green' : ''}" data-occ-ok="${o.key}">${inc ? 'Пришло' : o.asap ? (o.it.save ? 'Отложил' : 'Отдал') : 'Оплачено'}</button>
           <button class="btn sm ghost" data-occ="${o.key}" aria-label="Подробнее">⋯</button></li>`;
       }).join('')}</ul></div>`;
   }
 
+  h += lifeCardHtml(LP);
   const waitComp = S.goals.filter(g => g.comp && g.done && !gCompTx(g));
   if (waitComp.length) h += `<div class="card"><div class="card-t" style="margin-bottom:8px;color:var(--good)">💌 Ждём компенсацию</div><ul class="list">${waitComp.map(g => `<li><div class="grow"><div>${esc(g.name)}</div><div class="d">потрачено ${longDate(g.done)} · вернут — отметьте</div></div><button class="btn sm green" data-g="comp" data-id="${g.id}">Компенсировано</button></li>`).join('')}</ul></div>`;
   h += warningsHtml(F);
@@ -841,16 +955,23 @@ function renderHome() {
 function debtCardHtml(F) {
   return S.schedule.filter(i => i.asap && !i.paused && (i.payLeft || 0) > 0).map(it => {
     const left = debtLeft(it), paid = debtPaid(it), total = it.payLeft;
-    if (left < 1) return `<div class="card"><div class="card-t" style="color:var(--good)">🎉 ${esc(it.name)} — долг закрыт</div><p class="sub" style="margin-top:6px">Отдано ${fmt(paid)} ₸. Можно поставить правило на паузу или удалить.</p></div>`;
+    if (left < 1) {
+      if (it.save && !it.returned) return `<div class="card debt-card"><div class="card-t" style="color:var(--good)">✅ ${esc(it.name)}: накоплено ${fmt(paid)} ₸</div>
+        <p class="sub" style="margin:6px 0 12px">Вся сумма на депозите. Снимите и отдайте одним разом — и отметьте здесь.</p>
+        <button class="btn green block" data-dret="${it.id}">Отдал(а) всю сумму ✓</button></div>`;
+      return `<div class="card"><div class="card-t" style="color:var(--good)">🎉 ${esc(it.name)} — долг закрыт${it.returned ? ' ' + longDate(it.returned) : ''}</div><p class="sub" style="margin-top:6px">${it.save ? 'Возвращено' : 'Отдано'} ${fmt(paid)} ₸. Можно поставить правило на паузу или удалить.</p></div>`;
+    }
     const pl = F.asapEvs.filter(e => e.o.it === it), now = pl.filter(e => e.d === 0), next = pl.filter(e => e.d > 0).slice(0, 4);
     const end = pl.length ? pl[pl.length - 1].o.date : null;
     const srcOf = o => { const x = F.occ.find(x => x.kind === 'income' && x.status !== 'skip' && (x.status === 'done' ? false : x.date === o.date)); return x ? `из «${esc(x.name)}»${o.date === F.today && !waiting() ? ' — когда придёт' : ''}` : 'из остатка'; };
-    return `<div class="card debt-card"><div class="card-h"><span class="card-t" style="color:var(--gold)">🚀 ${esc(it.name)} — как можно быстрее</span><button class="link" data-item="${it.id}">настроить</button></div>
-      <div class="kv"><span>Осталось вернуть</span><span><b>${fmt(left)}</b> из ${fmt(total)}</span></div>
+    const sv = it.save;
+    return `<div class="card debt-card"><div class="card-h"><span class="card-t" style="color:var(--gold)">${sv ? '🏦' : '🚀'} ${esc(it.name)} — ${sv ? 'копим на депозите' : 'как можно быстрее'}</span><button class="link" data-item="${it.id}">настроить</button></div>
+      ${sv ? `<div class="kv"><span>На депозите</span><span><b>${fmt(paid)}</b> из ${fmt(total)}</span></div><div class="kv"><span>Осталось накопить</span><span>${fmt(left)}</span></div>` : `<div class="kv"><span>Осталось вернуть</span><span><b>${fmt(left)}</b> из ${fmt(total)}</span></div>`}
       <div class="t-bar" style="margin:6px 0 12px"><i style="width:${clamp(paid / total) * 100}%;background:var(--gold)"></i></div>
-      ${now.map(e => `<div class="banner yel" style="margin-bottom:10px;align-items:center"><span class="ic">🤝</span><span class="grow">${waiting() ? `В день старта, ${longDate(e.o.date)}, отдать` : 'Сегодня можно отдать'} <b class="mono">${fmt(e.o.amount)} ₸</b> ${srcOf(e.o)}</span>${waiting() ? '' : `<button class="btn sm green" data-occ-ok="${e.o.key}">Отдал</button>`}</div>`).join('')}
+      ${now.map(e => `<div class="banner yel" style="margin-bottom:10px;align-items:center"><span class="ic">🤝</span><span class="grow">${waiting() ? `В день старта, ${longDate(e.o.date)}, ${sv ? 'отложить' : 'отдать'}` : sv ? 'Сегодня отложить на депозит' : 'Сегодня можно отдать'} <b class="mono">${fmt(e.o.amount)} ₸</b> ${srcOf(e.o)}</span>${waiting() ? '' : `<button class="btn sm green" data-occ-ok="${e.o.key}">${sv ? 'Отложил' : 'Отдал'}</button>`}</div>`).join('')}
       ${next.length ? `<ul class="list">${next.map(e => `<li class="tap" data-occ="${e.o.key}"><div class="grow"><div>${longDate(e.o.date)}, ${wd(e.o.date)}</div><div class="d">${relDay(e.o.date)} · ${srcOf(e.o)}</div></div><span class="v">−${fmt(e.o.amount)}</span></li>`).join('')}</ul>` : ''}
-      ${end ? `<p class="note" style="margin-top:8px">Закрытие по плану: <b style="color:var(--text)">${longDate(end)} ${end.slice(0, 4)}</b>. Суммы подобраны так, что дневной лимит не ниже, чем при ${fmt(it.amount)} ₸ в месяц. Пересчитывается каждый день: потратил меньше — отдашь больше.</p>` : ''}</div>`;
+      ${end ? `<p class="note" style="margin-top:8px">${sv ? 'Вся сумма будет на депозите' : 'Закрытие по плану'}: <b style="color:var(--text)">${longDate(end)} ${end.slice(0, 4)}</b>${it.asapBy ? ` (срок — ${longDate(it.asapBy)})` : ''}. ${it.asapBy ? 'Лимит на жизнь — максимальный, при котором успеваем к сроку.' : `Суммы подобраны так, что дневной лимит не ниже, чем при ${fmt(it.amount)} ₸ в месяц.`} Пересчитывается каждый день: потратил меньше — ${sv ? 'отложишь' : 'отдашь'} больше.</p>` : ''}
+      ${sv && !waiting() ? `<button class="link" style="margin-top:6px" data-dint="${it.id}">+ проценты по депозиту</button>` : ''}</div>`;
   }).join('');
 }
 /* ---------- предупреждения ---------- */
@@ -1041,6 +1162,7 @@ function renderPlan() {
       <div class="set-row tap" data-act="cats" style="cursor:pointer"><div><div class="l">Категории трат</div><div class="h">${S.cats.map(c => c.e).join(' ')}</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="hol" style="cursor:pointer"><div><div class="l">Праздники и выходные</div><div class="h">праздники РК + ${S.holidays.length} своих</div></div><span class="sub">›</span></div>
       ${waiting() ? `<div class="set-row tap" data-act="startedit" style="cursor:pointer"><div><div class="l">Старт учёта</div><div class="h">${longDate(S.profile.startDate)} · на счету ${money(S.profile.expBalance || 0)}</div></div><span class="sub">›</span></div>` : ''}
+      <div class="set-row tap" data-act="life" style="cursor:pointer"><div><div class="l">🧺 Статьи жизни</div><div class="h">${lifeOn() ? S.life.items.map(i => i.e + ' ' + i.n).join(' · ') : 'выключены — лимит одной суммой. Нажмите, чтобы включить'}</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="envhelp" style="cursor:pointer"><div><div class="l">📥 Физические конверты</div><div class="h">${envOn() ? `включены · лежит ${money(envBalance())}` : 'выключены — всё на карте'}</div></div><span class="sub">›</span></div>
       <div class="set-row tap" data-act="adjust" style="cursor:pointer"><div><div class="l">Баланс</div><div class="h">${money(balance())} · сверить с картой</div></div><span class="sub">›</span></div>
     </div>
@@ -1050,7 +1172,7 @@ function renderPlan() {
       <p class="note" style="margin-top:10px">Данные хранятся только на этом устройстве. Экспорт — один JSON-файл со всем.</p>
       <button class="btn ghost block" style="margin-top:12px" data-act="restart">Начать учёт заново</button>
       <button class="btn danger block" style="margin-top:8px" data-act="reset">Сбросить всё</button></div>
-    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.13.0</p>`;
+    <p class="sub mono" style="text-align:center;font-size:11px;opacity:.6">Finance Flow · v0.14.0</p>`;
   $('#planBox').innerHTML = h;
   $('#sFloor').onchange = e => { const v = parseMoney(e.target.value); S.profile.floor = Math.max(0, v || 0); save(); render(); toast('Сохранено'); };
 }
@@ -1634,7 +1756,7 @@ function monthSummary(bym) {
   const sd = S.profile.onboarded ? S.profile.startDate : null;
   const occ = genOcc(ymAdd(bym, -1), ymAdd(bym, 2), true).filter(o => o.bym === bym && o.status !== 'skip' && (o.status === 'done' || !sd || o.date >= sd));
   // учёт начался посреди этого бюджетного месяца — остаток на старте считается доходом месяца
-  const startIn = sd && sd > bStart(bym) && sd <= bEnd(bym);
+  const startIn = sd && sd >= bStart(bym) && sd <= bEnd(bym) && (S.profile.startBalance != null ? S.profile.startBalance : S.profile.expBalance || 0) > 0;
   const startAmt = startIn ? (S.profile.startBalance != null ? S.profile.startBalance : S.profile.expBalance || 0) : 0;
   const amt = o => { if (o.status === 'done') { const t = S.tx.find(t => t.id === o.txId); if (t) return t.amount; } return o.amount; };
   const inc = startAmt + occ.filter(o => o.kind === 'income').reduce((s, o) => s + amt(o), 0)
@@ -1720,7 +1842,7 @@ function openTx(id, preset = {}) {
     $('#mvDel').onclick = () => { if (confirm('Удалить перевод?')) { S.tx = S.tx.filter(x => x.id !== t.id); afterChange('Удалено'); } };
     return;
   }
-  let type = t ? t.type : preset.type || 'expense', ctg = t ? t.cat : 'food';
+  let type = t ? t.type : preset.type || 'expense', ctg = t ? t.cat : (lifeOn() ? S.cats[0].id : 'food');
   const F = forecast(), left = Math.max(0, F.L) - F.spent;
   const draw = keep => {
     const v = keep || { amount: t ? fmt(t.amount) : '', note: t ? (t.note || t.name || '') : '', date: t ? t.date : preset.date || dayKey() };
@@ -1751,7 +1873,11 @@ function openTx(id, preset = {}) {
       if (type === 'expense') { rec.note = note; delete rec.name; } else { rec.name = note || (type === 'income' ? 'Доход' : TX_T[type]); delete rec.note; }
       if (!t) S.tx.push(rec);
       save(); closeSheet(); render(); vibrate(15);
-      if (type === 'expense' && date === dayKey()) {
+      const LP2 = type === 'expense' ? lifePlan() : null;
+      if (LP2) {
+        const it2 = lifeOfCat(ctg), r = it2 && LP2.rows.find(x => x.id === it2.id);
+        if (r) { const rem = r.alloc - r.spent; toast(`−${fmt(a)} · ${r.e} ${r.n}: ${rem >= 0 ? `осталось ${money(rem)}` : `перерасход ${money(-rem)}`}`); } else toast('Добавлено');
+      } else if (type === 'expense' && date === dayKey()) {
         const F2 = forecast(), l2 = Math.max(0, F2.L) - F2.spent;
         toast(l2 >= 0 ? `−${fmt(a)} · сегодня ещё ${money(l2)}` : `−${fmt(a)} · перерасход ${money(-l2)}, завтрашний лимит станет меньше`);
       } else toast(t ? 'Сохранено' : 'Добавлено');
@@ -1841,7 +1967,7 @@ function openConfirm(key, editing) {
   const defDate = tx ? tx.date : (planDate(o) < today ? planDate(o) : today);
   const envAvail = envBalance() + (tx && tx.envPart ? tx.envPart : 0);
   const envFree = Math.max(0, Math.round(envAvail - (inc ? 0 : envTarget().need(pkey))));
-  openSheet(`<h2>${inc ? 'Доход получен' : o.asap ? 'Отдано' : 'Платёж проведён'}</h2><p class="sub">${esc(o.name)} · ${o.asap ? `осталось вернуть ${money(debtLeft(o.it) + (tx ? tx.amount : 0))}` : ymNameShort(o.ym)}</p>
+  openSheet(`<h2>${inc ? 'Доход получен' : o.asap ? (o.it.save ? 'Отложено на депозит' : 'Отдано') : 'Платёж проведён'}</h2><p class="sub">${esc(o.name)} · ${o.asap ? `${o.it.save ? 'осталось накопить' : 'осталось вернуть'} ${money(debtLeft(o.it) + (tx ? tx.amount : 0))}` : ymNameShort(o.ym)}</p>
     <div class="field"><label>Фактическая сумма</label><input id="cfAmt" class="huge" inputmode="numeric" data-money value="${fmt(tx ? tx.amount : o.amount)}"><span class="u">₸</span></div>
     <div class="field"><label>Дата</label><input id="cfDate" type="date" value="${defDate > today ? today : defDate}" max="${today}"></div>
     <label class="toggle"><span>Уже учтено в балансе<small>например, пришло до того, как вы ввели стартовый баланс</small></span><input type="checkbox" id="cfNoBal" ${tx && tx.noBal ? 'checked' : ''}></label>
@@ -1933,7 +2059,9 @@ function openItem(id, kindNew) {
       <div class="stabs">${[['day', 'Число месяца'], inc ? ['win', 'Окно дат'] : ['flex', 'Любой день месяца']].map(([k, l]) => `<button data-dm="${k}" class="${dateMode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       ${dateMode === 'flex' ? (!inc ? `<label class="toggle"><span>🚀 Вернуть как можно быстрее<small>в каждый день прихода денег — максимум, который можно отдать, не снижая дневной лимит</small></span><input type="checkbox" id="itAsap" ${d.asap ? 'checked' : ''}></label>
         ${d.asap ? `<div class="field"><label>Сколько всего вернуть</label><input id="asLeft" inputmode="numeric" data-money placeholder="600 000" value="${d.payLeft ? fmt(d.payLeft) : ''}"><span class="u">₸</span>
-          <div class="hint">${old && debtPaid(old) ? `Уже отдано через приложение: ${fmt(debtPaid(old))} ₸, осталось ${fmt(Math.max(0, (d.payLeft || 0) - debtPaid(old)))} ₸. ` : ''}Отметки «Отдал» вычитаются автоматически. «Минимум в месяц» — темп, ниже которого лимит не опустится: всё сверх него алгоритм отдаёт досрочно.</div></div>` : ''}` : '')
+          <div class="hint">${old && debtPaid(old) ? `Уже ${d.save ? 'накоплено' : 'отдано'} через приложение: ${fmt(debtPaid(old))} ₸, осталось ${fmt(Math.max(0, (d.payLeft || 0) - debtPaid(old)))} ₸. ` : ''}Отметки «Отдал» вычитаются автоматически. «Минимум в месяц» — темп, ниже которого лимит не опустится: всё сверх него алгоритм отдаёт досрочно.</div></div>
+        <div class="field"><label>Закрыть к дате (необязательно)</label><input id="asBy" type="date" value="${d.asapBy || ''}"><div class="hint">Если указать — лимит на жизнь будет максимальным, при котором долг закрывается к этой дате. «Минимум в месяц» тогда не используется.</div></div>
+        <label class="toggle"><span>🏦 Копить на депозите и отдать разом<small>суммы по плану откладываются на депозит; когда наберётся вся сумма — отдаёте одним разом</small></span><input type="checkbox" id="asSave" ${d.save ? 'checked' : ''}></label>` : ''}` : '')
         + (d.asap && !inc ? '' : '<p class="note" style="margin:-4px 0 12px">Алгоритм сам подберёт лучший день в каждом месяце и подскажет, из какого дохода платить.</p>') : `
         <div class="${dateMode === 'win' ? 'two' : ''}">
           <div class="field"><label>${dateMode === 'win' ? 'С какого числа' : 'Число'}</label><input id="itDay" inputmode="numeric" value="${d.day}"></div>
@@ -2014,6 +2142,8 @@ function openItem(id, kindNew) {
     if ($('#itDebt')) d.isDebt = $('#itDebt').checked;
     if ($('#itAsap')) d.asap = $('#itAsap').checked;
     if ($('#asLeft')) d.payLeft = parseMoney($('#asLeft').value);
+    if ($('#asBy')) d.asapBy = $('#asBy').value || null;
+    if ($('#asSave')) d.save = $('#asSave').checked;
     if ($('#pfAmt')) { d.payAmt = parseMoney($('#pfAmt').value); d.payLeft = parseMoney($('#pfLeft').value); d.payFrom = $('#pfFrom').value || d.payFrom; }
   };
   handler = e => {
@@ -2130,10 +2260,13 @@ function importData(file) {
         // файл-шаблон расписания: заменяет только доходы и платежи, журнал и баланс не трогает
         if (S.schedule.length && !confirm(`Заменить расписание (${S.schedule.length} правил) на правила из файла (${raw.schedule.length})?`)) return;
         S.schedule = raw.schedule.map(normItem); S.occ = {};
+        if (Array.isArray(raw.life)) { S.life = { items: raw.life.map(normLife) }; ensureLifeCats(); }
         // цели из файла добавляются к существующим (по названию без дублей)
         let ng = 0;
         for (const g of raw.goals || []) {
-          if (!g.name || !(+g.amount > 0) || S.goals.some(x => x.name === g.name && !x.done)) continue;
+          if (!g.name || !(+g.amount > 0)) continue;
+          const ex = S.goals.find(x => x.name === g.name && !x.done);
+          if (ex) { Object.assign(ex, { amount: Math.round(+g.amount), date: g.date || null, cushion: !!g.cushion, comp: !!g.comp }); continue; }
           S.goals.push({ id: uid(), name: g.name, amount: Math.round(+g.amount), date: g.date || null, cushion: !!g.cushion, comp: !!g.comp, ops: [], done: null, createdAt: new Date().toISOString() }); ng++;
         }
         save(); closeSheet(); render(); if ($('#onb').classList.contains('open')) renderOnb();
@@ -2416,6 +2549,8 @@ document.addEventListener('input', e => {
 $('#app').addEventListener('click', e => {
   const okb = e.target.closest('[data-occ-ok]'); if (okb) return openConfirm(okb.dataset.occOk);
   const ev = e.target.closest('[data-env]'); if (ev) return openEnvMove(+ev.dataset.env);
+  const dr = e.target.closest('[data-dret]'); if (dr) { const it = item(dr.dataset.dret); if (it && confirm(`Отметить, что ${fmt(debtPaid(it))} ₸ отданы? Это просто отметка — деньги уже учтены, когда вы откладывали.`)) { it.returned = dayKey(); return afterChange(`🎉 ${it.name}: долг закрыт!`); } return; }
+  const di = e.target.closest('[data-dint]'); if (di) return openDebtInterest(di.dataset.dint);
   const al = e.target.closest('[data-alloc]'); if (al) return openAlloc(al.dataset.alloc);
   const so = e.target.closest('[data-so]'); if (so && !so.disabled) { sumOff = clamp(sumOff + +so.dataset.so, 0, 1); return renderHome(); }
   const cv = e.target.closest('[data-cv]'); if (cv) { calView = cv.dataset.cv; return renderCal(); }
@@ -2436,6 +2571,7 @@ $('#app').addEventListener('click', e => {
   if (act === 'adjust') openAdjust();
   if (act === 'distyear') { distYear = !distYear; renderCal(); if (!distYear) window.scrollTo(0, 0); }
   if (act === 'envhelp') openEnvHelp();
+  if (act === 'life') { if (lifeOn()) openLifeNorms(); else { S.life = { items: LIFE_DEF.map(normLife) }; ensureLifeCats(); afterChange('Статьи жизни включены — настройте нормы'); setTimeout(openLifeNorms, 400); } }
   if (act === 'dayclose') openDayClose(dayKey());
   if (act === 'health') openHealth();
   if (act === 'dist') { calView = 'dist'; go('cal'); }
